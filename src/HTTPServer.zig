@@ -54,13 +54,14 @@ pub fn setListener(
     data: T,
 ) !void {
     const callback: ?*anyopaque = @ptrFromInt(@intFromPtr(listener));
-    var handler = Handler{ .callback = callback, .data = data };
+    const handler = try self.alloc.create(Handler);
+    handler.* = Handler{ .callback = callback, .data = data };
 
     const buf = try self.alloc.alloc(u8, @tagName(method).len + path.len + 1);
     defer self.alloc.free(buf);
     _ = try std.fmt.bufPrint(buf, "{s}/{s}", .{ @tagName(method), path });
 
-    try self.tree.addPath(buf, &handler);
+    try self.tree.addPath(buf, handler);
 }
 
 pub fn run(self: *Self) !void {
@@ -84,10 +85,16 @@ pub fn run(self: *Self) !void {
         var buffer = std.ArrayList([]const u8).init(self.alloc);
         defer buffer.deinit();
 
-        self.tree.getPath(path, &buffer, @constCast(conn)) catch |err| switch (err) {
-            error.PathNotFound => try send404(@constCast(conn)),
+        const handler = self.tree.getPath(path, &buffer) catch |err| switch (err) {
+            error.PathNotFound => {
+                try send404(@constCast(conn));
+                continue;
+            },
             else => return err,
         };
+
+        const callback: *const fn (*std.net.Server.Connection, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
+        callback(@constCast(conn), buffer.items, handler.data);
     } else |err| return err;
 }
 
@@ -184,5 +191,7 @@ test "mox" {
             test_struct.getHello,
             &data,
         );
+
+        try server.run();
     }
 }
