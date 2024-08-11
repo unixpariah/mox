@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const lib = b.addStaticLibrary(.{
         .name = "mox",
-        .root_source_file = b.path("src/mox.zig"),
+        .root_source_file = b.path("src/HTTPServer.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     const root_files = [_][]const u8{
-        "src/mox.zig",
+        "src/HTTPServer.zig",
         "src/Tree.zig",
     };
 
