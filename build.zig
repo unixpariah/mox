@@ -4,14 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
-        .name = "mox",
+    _ = b.addModule("mox", .{
         .root_source_file = b.path("src/HTTPServer.zig"),
         .target = target,
         .optimize = optimize,
     });
-
-    b.installArtifact(lib);
 
     const root_files = [_][]const u8{
         "src/HTTPServer.zig",

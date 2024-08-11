@@ -79,12 +79,12 @@ pub fn run(self: *Self) !void {
 
         const recv_data = recv_buf[0..recv_total];
         const header = try parseHeader(recv_data);
-        const path = try parsePath(header.request_line);
+        const path = try parsePath(header.request_line, self.alloc);
 
         var buffer = std.ArrayList([]const u8).init(self.alloc);
         defer buffer.deinit();
 
-        self.tree.getPath(path, &buffer, conn);
+        try self.tree.getPath(path, &buffer, @constCast(conn));
     } else |err| return err;
 }
 
@@ -119,7 +119,7 @@ fn parsePath(request_line: []const u8, alloc: std.mem.Allocator) ![]const u8 {
     if (!std.mem.eql(u8, proto, "HTTP/1.1")) return error.TODO;
 
     const buf = try alloc.alloc(u8, method.len + path.len + 1);
-    std.fmt.bufPrint(buf, "{s}/{s}", .{ method, path });
+    _ = try std.fmt.bufPrint(buf, "{s}/{s}", .{ method, path });
 
     return buf;
 }
