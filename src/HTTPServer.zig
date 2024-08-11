@@ -130,7 +130,7 @@ fn parsePath(request_line: []const u8, alloc: std.mem.Allocator) ![]const u8 {
     const path = request_line_iter.next().?;
 
     const proto = request_line_iter.next().?;
-    if (!std.mem.eql(u8, proto, "HTTP/1.1")) return error.TODO;
+    if (!std.mem.eql(u8, proto, "HTTP/1.1")) return error.ProtoNotSupported;
 
     const buf = try alloc.alloc(u8, method.len + path.len + 1);
     _ = try std.fmt.bufPrint(buf, "{s}/{s}", .{ method, path });

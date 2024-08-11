@@ -80,7 +80,7 @@ const Node = struct {
     }
 
     fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), buf: *std.ArrayList([]const u8), conn: *std.net.Server.Connection) !void {
-        const p = path_iter.next() orelse return;
+        const p = path_iter.next() orelse return error.PathNotFound;
         if (self.children.getPtr(p)) |child| {
             return child.getPath(path_iter, buf, conn);
         }
@@ -93,6 +93,7 @@ const Node = struct {
         if (self.data) |handler| {
             const callback: *const fn (*std.net.Server.Connection, [][]const u8, data: ?*anyopaque) void = @ptrCast(handler.callback);
             callback(conn, buf.items, handler.data);
+            return;
         }
 
         return error.PathNotFound;
