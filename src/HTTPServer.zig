@@ -84,8 +84,22 @@ pub fn run(self: *Self) !void {
         var buffer = std.ArrayList([]const u8).init(self.alloc);
         defer buffer.deinit();
 
-        try self.tree.getPath(path, &buffer, @constCast(conn));
+        self.tree.getPath(path, &buffer, @constCast(conn)) catch |err| switch (err) {
+            error.PathNotFound => try send404(@constCast(conn)),
+            else => return err,
+        };
     } else |err| return err;
+}
+
+pub fn send404(conn: *std.net.Server.Connection) !void {
+    const response = "HTTP/1.1 404 NOT FOUND \r\n" ++
+        "Connection: close\r\n" ++
+        "Content-Type: text/html; charset=utf8\r\n" ++
+        "Content-Length: 9\r\n" ++
+        "\r\n" ++
+        "NOT FOUND";
+
+    _ = try conn.stream.writer().print(response, .{});
 }
 
 fn parseHeader(header: []const u8) !HTTPHeader {
