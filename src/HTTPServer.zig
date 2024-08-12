@@ -50,24 +50,23 @@ pub fn setListener(
     method: Method,
     path: []const u8,
     comptime T: type,
-    listener: *const fn (connection: *std.net.Server.Connection, parameters: [][]const u8, data: T) void,
+    listener: *const fn (connection: *std.net.Server.Connection, data: T) void,
     data: T,
 ) !void {
-    const callback: ?*anyopaque = @ptrFromInt(@intFromPtr(listener));
-    const handler = try self.tree.arena.allocator().create(Handler);
-    handler.* = Handler{ .callback = callback, .data = data };
+    const callback: ?*anyopaque = @constCast(listener);
+    const handler = Handler{ .callback = callback, .data = data };
 
     const buf = try self.alloc.alloc(u8, @tagName(method).len + path.len + 1);
     defer self.alloc.free(buf);
-    _ = try std.fmt.bufPrint(buf, "{s}/{s}", .{ @tagName(method), path });
+    _ = try std.fmt.bufPrint(buf, "{s}{s}", .{ @tagName(method), path });
 
+    // TODO: Put this onto a tree
     try self.tree.addPath(buf, handler);
 }
 
 pub fn run(self: *Self) !void {
     var listener = self.listener orelse return error.NotBound;
     while (listener.accept()) |*conn| {
-        std.debug.print("Accepted connection from: {}\n", .{conn.address});
         var recv_buf: [4096]u8 = undefined;
         var recv_total: usize = 0;
         while (conn.stream.read(recv_buf[recv_total..])) |recv_len| {
@@ -82,10 +81,7 @@ pub fn run(self: *Self) !void {
         const header = try parseHeader(recv_data);
         const path = try parsePath(header.request_line, self.alloc);
 
-        var buffer = std.ArrayList([]const u8).init(self.alloc);
-        defer buffer.deinit();
-
-        const handler = self.tree.getPath(path, &buffer) catch |err| switch (err) {
+        const handler = self.tree.getPath(path) catch |err| switch (err) {
             error.PathNotFound => {
                 try send404(@constCast(conn));
                 continue;
@@ -93,8 +89,8 @@ pub fn run(self: *Self) !void {
             else => return err,
         };
 
-        const callback: *const fn (*std.net.Server.Connection, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
-        callback(@constCast(conn), buffer.items, handler.data);
+        const callback: *const fn (*std.net.Server.Connection, ?*anyopaque) void = @ptrCast(handler.callback);
+        callback(@constCast(conn), handler.data);
     } else |err| return err;
 }
 
@@ -140,7 +136,7 @@ fn parsePath(request_line: []const u8, alloc: std.mem.Allocator) ![]const u8 {
     if (!std.mem.eql(u8, proto, "HTTP/1.1")) return error.ProtoNotSupported;
 
     const buf = try alloc.alloc(u8, method.len + path.len + 1);
-    _ = try std.fmt.bufPrint(buf, "{s}/{s}", .{ method, path });
+    _ = try std.fmt.bufPrint(buf, "{s}{s}", .{ method, path });
 
     return buf;
 }
@@ -164,7 +160,7 @@ test "mox" {
     const Data = struct {};
 
     const test_struct = struct {
-        fn getHello(_: *std.net.Server.Connection, _: [][]const u8, _: *Data) void {}
+        fn getHello(_: *std.net.Server.Connection, _: *Data) void {}
     };
 
     const testing = std.testing;

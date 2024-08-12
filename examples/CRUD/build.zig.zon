@@ -1,0 +1,19 @@
+.{
+    .name = "CRUD",
+
+    .version = "0.0.0",
+
+    .dependencies = .{
+        .mox = .{
+            .path = "../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        // For example...
+        //"LICENSE",
+        //"README.md",
+    },
+}

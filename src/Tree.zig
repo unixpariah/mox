@@ -1,8 +1,8 @@
 const std = @import("std");
 
 pub const Handler = struct {
-    data: ?*anyopaque,
     callback: ?*anyopaque,
+    data: ?*anyopaque,
 };
 
 arena: std.heap.ArenaAllocator,
@@ -22,33 +22,26 @@ pub fn deinit(self: *Self) void {
     self.children.deinit();
 }
 
-pub fn addPath(self: *Self, path: []const u8, handler: *Handler) !void {
+pub fn addPath(self: *Self, path: []const u8, handler: Handler) !void {
     const alloc = self.arena.allocator();
 
     var path_iter = std.mem.splitScalar(u8, path, '/');
-    const segment = path_iter.next() orelse return error.PathNotFound;
+    const segment = path_iter.first();
 
     if (self.children.getPtr(segment)) |child| {
         return child.addPath(alloc, handler, &path_iter);
     }
 
-    var node = Node.new(alloc);
+    var node = Node.init(alloc);
     try node.addPath(alloc, handler, &path_iter);
-    const segment_alloc = try alloc.alloc(u8, segment.len);
-    @memcpy(segment_alloc, segment);
-    try self.children.put(segment_alloc, node);
+    try self.children.put(try alloc.dupe(u8, segment), node);
 }
 
-pub fn getPath(self: *Self, path: []const u8, buf: *std.ArrayList([]const u8)) !*Handler {
+pub fn getPath(self: *Self, path: []const u8) !Handler {
     var path_iter = std.mem.splitScalar(u8, path, '/');
-    const segment = path_iter.next() orelse return error.PathNotFound;
+    const segment = path_iter.first();
     if (self.children.getPtr(segment)) |child| {
-        return child.getPath(&path_iter, buf);
-    }
-
-    if (self.children.getPtr("{}")) |child| {
-        try buf.append(segment);
-        return child.getPath(&path_iter, buf);
+        return child.getPath(&path_iter);
     }
 
     return error.PathNotFound;
@@ -56,129 +49,218 @@ pub fn getPath(self: *Self, path: []const u8, buf: *std.ArrayList([]const u8)) !
 
 const Node = struct {
     children: std.StringHashMap(Node),
-    data: ?*Handler,
+    data: ?Handler,
 
-    fn new(alloc: std.mem.Allocator) Node {
-        return .{ .children = std.StringHashMap(Node).init(alloc), .data = null };
+    fn init(alloc: std.mem.Allocator) Node {
+        return .{
+            .children = std.StringHashMap(Node).init(alloc),
+            .data = null,
+        };
     }
 
-    fn addPath(self: *Node, alloc: std.mem.Allocator, handler: *Handler, path_iter: *std.mem.SplitIterator(u8, .scalar)) !void {
-        const p = path_iter.next() orelse {
-            if (self.data != null) return error.ListenerExists;
-            self.data = handler;
-            return;
-        };
+    fn addPath(self: *Node, alloc: std.mem.Allocator, handler: Handler, path_iter: *std.mem.SplitIterator(u8, .scalar)) !void {
+        const segment = path_iter.next() orelse return;
 
-        if (self.children.getPtr(p)) |child| {
+        if (self.children.getPtr(segment)) |child| {
+            if (path_iter.peek() == null) {
+                if (child.data != null) return error.ListenerExists;
+                child.data = handler;
+            }
             return child.addPath(alloc, handler, path_iter);
         }
 
-        var node = Node.new(alloc);
+        var node = Node.init(alloc);
+        if (path_iter.peek() == null) {
+            node.data = handler;
+        }
         try node.addPath(alloc, handler, path_iter);
-        try self.children.put(p, node);
+        try self.children.put(try alloc.dupe(u8, segment), node);
     }
 
-    fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), buf: *std.ArrayList([]const u8)) !*Handler {
-        const p = path_iter.next() orelse {
-            if (self.data) |handler| return handler;
-            return error.PathNotFound;
-        };
-        if (self.children.getPtr(p)) |child| {
-            return child.getPath(path_iter, buf);
-        }
+    fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar)) !Handler {
+        const segment = path_iter.next() orelse return error.PathNotFound;
 
-        if (self.children.getPtr("{}")) |child| {
-            try buf.append(p);
-            return child.getPath(path_iter, buf);
+        if (self.children.getPtr(segment)) |child| {
+            if (path_iter.peek() == null) return child.data orelse error.PathNotFound;
+            return child.getPath(path_iter);
         }
 
         return error.PathNotFound;
     }
 };
 
-test "Tree" {
+test "Tree.addPath" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    defer arena.deinit();
+    const Data = struct {
+        number: u8 = 0,
+    };
 
-    const Data = struct {};
-
-    const test_struct = struct {
-        fn getHello(_: [][]const u8, _: *Data) void {
-            std.debug.print("Hello world\n", .{});
-        }
+    const test_functions = struct {
+        fn getNothing(_: ?*anyopaque) void {}
     };
 
     var data = Data{};
 
     var tree = Self.init(alloc);
     defer tree.deinit();
+
+    try tree.addPath("GET/", .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    });
+    try testing.expect(tree.children.get("GET") != null);
+    try testing.expect(tree.children.get("GET").?.children.get("") != null);
+    try testing.expect(tree.children.get("GET").?.children.get("").?.data != null);
+
+    try tree.addPath("POST/hello/world", .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    });
+    try testing.expect(tree.children.get("POST") != null);
+    try testing.expect(tree.children.get("POST").?.children.get("hello") != null);
+    try testing.expect(tree.children.get("POST").?.children.get("hello").?.children.get("world") != null);
+    try testing.expect(tree.children.get("POST").?.children.get("hello").?.children.get("world").?.data != null);
+
+    try tree.addPath("POST/bye/world", .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    });
+    try testing.expect(tree.children.get("POST").?.children.get("bye") != null);
+    try testing.expect(tree.children.get("POST").?.children.get("bye").?.children.get("world") != null);
+    try testing.expect(tree.children.get("POST").?.children.get("bye").?.children.get("world").?.data != null);
+
+    try testing.expect(tree.addPath("POST/bye/world", .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    }) == error.ListenerExists);
+
+    try testing.expect(tree.addPath("GET/", .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    }) == error.ListenerExists);
+}
+
+test "Tree.getPath" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    const eql = std.meta.eql;
+
+    const Data = struct {
+        number: u8 = 0,
+    };
+
+    const test_functions = struct {
+        fn getNothing(_: ?*anyopaque) void {}
+        fn getHello(_: ?*anyopaque) void {}
+        fn getBye(_: ?*anyopaque) void {}
+        fn getHelloWorld(_: ?*anyopaque) void {}
+        fn getByeWolrd(_: ?*anyopaque) void {}
+    };
+
+    var data = Data{};
+
+    var tree = Self.init(alloc);
+    defer tree.deinit();
+
+    const handler: Handler = .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    };
+    try tree.addPath("GET/", handler);
+    try testing.expect(eql(tree.getPath("GET/"), handler));
+
+    const hello_world_handler: Handler = .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    };
+    try tree.addPath("GET/hello/world", hello_world_handler);
+    try testing.expect(tree.getPath("GET/hello") == error.PathNotFound);
+    try testing.expect(eql(tree.getPath("GET/hello/world"), hello_world_handler));
+
+    const bye_world_handler: Handler = .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    };
+    try tree.addPath("GET/bye/world", bye_world_handler);
+    try testing.expect(tree.getPath("GET/bye") == error.PathNotFound);
+    try testing.expect(eql(tree.getPath("GET/bye/world"), bye_world_handler));
+
+    const hello_handler: Handler = .{
+        .callback = @constCast(&test_functions.getHello),
+        .data = @ptrCast(&data),
+    };
+    try tree.addPath("GET/hello", hello_handler);
+    try testing.expect(eql(tree.getPath("GET/hello"), hello_handler));
+
+    const bye_handler: Handler = .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    };
+    try tree.addPath("GET/bye", bye_handler);
+    try testing.expect(eql(tree.getPath("GET/bye"), bye_handler));
+
+    const functions = struct {
+        fn getIncrement(counter: *i32) void {
+            counter.* += 1;
+        }
+        fn getDecrement(counter: *i32) void {
+            counter.* -= 1;
+        }
+        fn getReset(counter: *i32) void {
+            counter.* = 0;
+        }
+    };
+
+    var counter: i32 = 0;
+
     {
-        const callback: ?*anyopaque = @ptrFromInt(@intFromPtr(&test_struct.getHello));
-        var handler = Handler{ .data = &data, .callback = callback };
+        const increment_handler: Handler = .{
+            .callback = @constCast(&functions.getIncrement),
+            .data = @ptrCast(&counter),
+        };
+        try tree.addPath("GET/increment", increment_handler);
 
-        try tree.addPath("GET/hello/world", &handler);
-        var buf = std.ArrayList([]const u8).init(arena.allocator());
-        const stored_handler = try tree.getPath("GET/hello/world", &buf);
-        try testing.expect(handler.data == stored_handler.data);
-        try testing.expect(handler.callback == stored_handler.callback);
+        const decrement_handler: Handler = .{
+            .callback = @constCast(&functions.getDecrement),
+            .data = @ptrCast(&counter),
+        };
+        try tree.addPath("GET/decrement", decrement_handler);
 
-        const callback_fn: *const fn ([][]const u8, ?*anyopaque) void = @ptrCast(stored_handler.callback);
-        callback_fn(&[_][]const u8{}, null);
+        const reset_handler: Handler = .{
+            .callback = @constCast(&functions.getReset),
+            .data = @ptrCast(&counter),
+        };
+        try tree.addPath("GET/reset", reset_handler);
     }
 
-    {
-        var buf = std.ArrayList([]const u8).init(arena.allocator());
-        defer buf.deinit();
-        try testing.expect(tree.getPath("GET/nonexistent", &buf) == error.PathNotFound);
-    }
+    const increment_handler = try tree.getPath("GET/increment");
+    const incrementCallback: *const fn (*i32) void = @ptrCast(increment_handler.callback);
 
-    {
-        var handler = Handler{ .data = null, .callback = @ptrFromInt(@intFromPtr(&test_struct.getHello)) };
-        try tree.addPath("GET/hello/{}/world", &handler);
-        var buf = std.ArrayList([]const u8).init(arena.allocator());
-        defer buf.deinit();
-        const stored_handler = try tree.getPath("GET/hello/whatever/world", &buf);
+    const decrement_handler = try tree.getPath("GET/decrement");
+    const decrementCallback: *const fn (*i32) void = @ptrCast(decrement_handler.callback);
 
-        try testing.expect(handler.data == stored_handler.data);
-        try testing.expect(handler.callback == stored_handler.callback);
+    const reset_handler = try tree.getPath("GET/reset");
+    const resetCallback: *const fn (*i32) void = @ptrCast(reset_handler.callback);
 
-        const callback_fn: *const fn ([][]const u8, ?*anyopaque) void = @ptrCast(stored_handler.callback);
-        callback_fn(&[_][]const u8{}, null);
-    }
+    try testing.expect(counter == 0);
 
-    {
-        var handler = Handler{ .data = null, .callback = null };
-        try testing.expect(tree.addPath("GET/hello/{}/world", &handler) == error.ListenerExists);
+    incrementCallback(&counter);
+    try testing.expect(counter == 1);
 
-        var buf = std.ArrayList([]const u8).init(arena.allocator());
-        defer buf.deinit();
-        const stored_handler = try tree.getPath("GET/hello/big/world", &buf);
+    incrementCallback(&counter);
+    try testing.expect(counter == 2);
 
-        const callback_fn: *const fn ([][]const u8, ?*anyopaque) void = @ptrCast(stored_handler.callback);
-        callback_fn(&[_][]const u8{}, null);
-    }
+    decrementCallback(&counter);
+    try testing.expect(counter == 1);
 
-    {
-        var buf = std.ArrayList([]const u8).init(arena.allocator());
-        defer buf.deinit();
-        const stored_handler = try tree.getPath("GET/hello/big/world", &buf);
-        try testing.expect(std.mem.eql(u8, buf.items[0], "big"));
+    incrementCallback(&counter);
+    try testing.expect(counter == 2);
 
-        const callback_fn: *const fn ([][]const u8, ?*anyopaque) void = @ptrCast(stored_handler.callback);
-        callback_fn(&[_][]const u8{}, null);
-    }
+    decrementCallback(&counter);
+    try testing.expect(counter == 1);
 
-    {
-        var buf = std.ArrayList([]const u8).init(arena.allocator());
-        defer buf.deinit();
-        var handler = Handler{ .data = null, .callback = null };
-        try tree.addPath("GET/hello/{}/world/{}", &handler);
-        _ = try tree.getPath("GET/hello/big/world/something", &buf);
-
-        try testing.expect(std.mem.eql(u8, buf.items[0], "big"));
-        try testing.expect(std.mem.eql(u8, buf.items[1], "something"));
-    }
+    resetCallback(&counter);
+    try testing.expect(counter == 0);
 }
