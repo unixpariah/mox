@@ -14,18 +14,26 @@ pub fn main() !void {
 
         break;
     }
-    std.debug.print("Listening on {s}:{}\n", .{ server.ip, server.port });
+    var counter: i32 = 0;
 
-    try server.setListener(.GET, "/hello", ?*anyopaque, getHello, null);
-    try server.setListener(.GET, "/hello/world", ?*anyopaque, getHelloWorld, null);
+    try server.setListener(.GET, "/increment", *i32, getIncrement, &counter);
+    try server.setListener(.GET, "/decrement", *i32, getDecrement, &counter);
 
     try server.run();
 }
 
-fn getHello(conn: *std.net.Server.Connection, _: ?*anyopaque) void {
-    std.debug.print("Received connection from: {}\n", .{conn.address});
+fn getIncrement(conn: *std.net.Server.Connection, counter: *i32) void {
+    counter.* += 1;
+    std.debug.print(
+        "This nice individual incremented number by 1: {}\nThe number is now {}\n",
+        .{ conn.address, counter.* },
+    );
 }
 
-fn getHelloWorld(conn: *std.net.Server.Connection, _: ?*anyopaque) void {
-    std.debug.print("Received connection from this nice idividual: {}\n", .{conn.address});
+fn getDecrement(conn: *std.net.Server.Connection, counter: *i32) void {
+    counter.* -= 1;
+    std.debug.print(
+        "This not very nice individual decremented number by 1: {}\nThe number is now {}\n",
+        .{ conn.address, counter.* },
+    );
 }
