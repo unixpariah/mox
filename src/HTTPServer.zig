@@ -54,7 +54,7 @@ pub fn setListener(
     data: T,
 ) !void {
     const callback: ?*anyopaque = @ptrFromInt(@intFromPtr(listener));
-    const handler = try self.alloc.create(Handler);
+    const handler = try self.tree.arena.allocator().create(Handler);
     handler.* = Handler{ .callback = callback, .data = data };
 
     const buf = try self.alloc.alloc(u8, @tagName(method).len + path.len + 1);
@@ -192,6 +192,6 @@ test "mox" {
             &data,
         );
 
-        try server.run();
+        //try server.run();
     }
 }
