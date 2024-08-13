@@ -1,24 +1,11 @@
 const std = @import("std");
+const Client = @import("Client.zig");
 
 conn: *const std.net.Server.Connection,
 alloc: std.mem.Allocator,
+client: Client,
 
 const Self = @This();
-
-pub fn send(self: *const Self, url: []const u8, method: std.http.Method, response_buffer: *std.ArrayList(u8)) !void {
-    var client: std.http.Client = .{
-        .allocator = self.alloc,
-    };
-    defer client.deinit();
-
-    const result = try client.fetch(.{
-        .location = .{ .url = url },
-        .response_storage = .{ .dynamic = response_buffer },
-        .method = method,
-    });
-
-    if (result.status != .ok) return error.HttpFailed;
-}
 
 pub fn respond(self: *const Self, content: Content, response_code: u10) !void {
     switch (content) {

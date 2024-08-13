@@ -1,6 +1,7 @@
 const std = @import("std");
 const Tree = @import("Tree.zig");
 pub const Request = @import("Request.zig");
+pub const Client = @import("Client.zig");
 
 ip: []const u8 = undefined,
 port: u16 = undefined,
@@ -81,6 +82,7 @@ pub fn run(self: *Self) !void {
         const request = Request{
             .conn = conn,
             .alloc = self.alloc,
+            .client = .{},
         };
 
         const callback: *const fn (Request, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
