@@ -3,7 +3,7 @@ const std = @import("std");
 const Self = @This();
 
 /// Send request, caller is responsible for freeing response buffer
-pub fn send(_: *const Self, url: []const u8, method: std.http.Method, alloc: std.mem.Allocator) ![]const u8 {
+pub fn send(_: *const Self, method: std.http.Method, url: []const u8, alloc: std.mem.Allocator) ![]const u8 {
     var client: std.http.Client = .{
         .allocator = alloc,
     };
