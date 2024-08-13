@@ -1,6 +1,5 @@
 const std = @import("std");
 const mox = @import("mox");
-const sendResponse = @import("mox").sendResponse;
 
 pub fn main() !void {
     var server = mox.init(std.heap.page_allocator);
@@ -25,7 +24,7 @@ pub fn main() !void {
     try server.run();
 }
 
-fn postCounterIncrement(conn: *std.net.Server.Connection, parameters: [][]const u8, counter: *i32) void {
+fn postCounterIncrement(request: mox.Request, parameters: [][]const u8, counter: *i32) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -33,18 +32,14 @@ fn postCounterIncrement(conn: *std.net.Server.Connection, parameters: [][]const 
     const number = std.fmt.parseInt(i32, parameters[0], 10) catch unreachable;
     counter.* += number;
 
-    sendResponse(
-        conn,
-        200,
-        std.fmt.allocPrint(
-            alloc,
-            "Number incremented by {} by this individual: {}\n",
-            .{ number, conn.address },
-        ) catch unreachable,
-    ) catch unreachable;
+    request.sendBody(std.fmt.allocPrint(
+        alloc,
+        "Number incremented by {} by this individual: {}\n",
+        .{ number, request.conn.address },
+    ) catch unreachable, 200) catch unreachable;
 }
 
-fn postCounterDecrement(conn: *std.net.Server.Connection, parameters: [][]const u8, counter: *i32) void {
+fn postCounterDecrement(request: mox.Request, parameters: [][]const u8, counter: *i32) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -52,47 +47,44 @@ fn postCounterDecrement(conn: *std.net.Server.Connection, parameters: [][]const 
     const number = std.fmt.parseInt(i32, parameters[0], 10) catch unreachable;
     counter.* -= number;
 
-    sendResponse(
-        conn,
-        200,
+    request.sendBody(
         std.fmt.allocPrint(
             alloc,
             "Number decremented by {} by this individual: {}\n",
-            .{ number, conn.address },
+            .{ number, request.conn.address },
         ) catch unreachable,
+        200,
     ) catch unreachable;
 }
 
-fn postCounterReset(conn: *std.net.Server.Connection, _: [][]const u8, counter: *i32) void {
+fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
     counter.* = 0;
 
-    sendResponse(
-        conn,
-        200,
+    request.sendBody(
         std.fmt.allocPrint(
             alloc,
             "Number reseted by this individual: {}\n",
-            .{conn.address},
+            .{request.conn.address},
         ) catch unreachable,
+        200,
     ) catch unreachable;
 }
 
-fn getCounter(conn: *std.net.Server.Connection, _: [][]const u8, counter: *i32) void {
+fn getCounter(request: mox.Request, _: [][]const u8, counter: *i32) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    sendResponse(
-        conn,
-        200,
+    request.sendBody(
         std.fmt.allocPrint(
             alloc,
             "Number is: {}\n",
             .{counter.*},
         ) catch unreachable,
+        200,
     ) catch unreachable;
 }

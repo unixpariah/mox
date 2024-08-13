@@ -23,8 +23,8 @@ pub fn build(b: *std.Build) void {
 
     const example = b.step("run-example", "Build and run example");
     const example_exe = b.addExecutable(.{
-        .name = "CRUD",
-        .root_source_file = b.path("examples/CRUD/main.zig"),
+        .name = "endpoint_simple",
+        .root_source_file = b.path("examples/endpoint_simple/main.zig"),
         .target = target,
         .optimize = optimize,
     });

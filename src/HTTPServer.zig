@@ -1,6 +1,7 @@
 const std = @import("std");
 const Tree = @import("Tree.zig");
 const StatusCodes = @import("StatusCodes.zig").StatusCodes;
+pub const Request = @import("Request.zig");
 
 const Method = enum {
     GET,
@@ -50,7 +51,7 @@ pub fn setListener(
     method: Method,
     path: []const u8,
     comptime T: type,
-    listener: *const fn (connection: *std.net.Server.Connection, parameters: [][]const u8, data: T) void,
+    listener: *const fn (request: Request, parameters: [][]const u8, data: T) void,
     data: T,
 ) !void {
     const callback: ?*anyopaque = @constCast(listener);
@@ -93,12 +94,16 @@ pub fn run(self: *Self) !void {
             else => return err,
         };
 
-        const callback: *const fn (*std.net.Server.Connection, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
-        callback(@constCast(conn), buffer.items, handler.data);
+        const request = Request{
+            .conn = conn,
+        };
+
+        const callback: *const fn (Request, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
+        callback(request, buffer.items, handler.data);
     } else |err| return err;
 }
 
-pub fn sendResponse(conn: *std.net.Server.Connection, response_code: u10, content: []const u8) !void {
+pub fn sendResponse(conn: *const std.net.Server.Connection, response_code: u10, content: []const u8) !void {
     const response = "HTTP/1.1 {} {s} \r\n" ++
         "Connection: close\r\n" ++
         "Content-Type: text/html; charset=utf8\r\n" ++
