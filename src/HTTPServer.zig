@@ -84,7 +84,8 @@ pub fn run(self: *Self) !void {
 
         var buffer = std.ArrayList([]const u8).init(self.alloc);
         defer buffer.deinit();
-        const handler = self.tree.getPath(path, &buffer) catch |err| switch (err) {
+        //                                               Remove trailing uninitialized memory
+        const handler = self.tree.getPath(path[0 .. path.len - 1], &buffer) catch |err| switch (err) {
             error.PathNotFound => {
                 try send404(@constCast(conn));
                 continue;
