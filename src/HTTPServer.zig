@@ -1,5 +1,6 @@
 const std = @import("std");
 const Tree = @import("Tree.zig");
+const Header = @import("HTTPHeader.zig");
 pub const Request = @import("Request.zig");
 pub const Client = @import("Client.zig");
 
@@ -65,24 +66,26 @@ pub fn run(self: *Self) !void {
         } else |err| return err;
 
         const recv_data = recv_buf[0..recv_total];
-        const header = try parseHeader(recv_data);
+        const header = try Header.parse(recv_data);
         const path = try parsePath(header.request_line, self.alloc);
-
-        var buffer = std.ArrayList([]const u8).init(self.alloc);
-        defer buffer.deinit();
-        //                                               Remove trailing uninitialized memory
-        const handler = self.tree.getPath(path[0 .. path.len - 1], &buffer) catch |err| switch (err) {
-            error.PathNotFound => {
-                try send404(@constCast(conn));
-                continue;
-            },
-            else => return err,
-        };
 
         const request = Request{
             .conn = conn,
             .alloc = self.alloc,
+            .header = header,
             .client = .{},
+        };
+
+        var buffer = std.ArrayList([]const u8).init(self.alloc);
+        defer buffer.deinit();
+
+        //                                Remove trailing uninitialized memory
+        const handler = self.tree.getPath(path[0 .. path.len - 1], &buffer) catch |err| switch (err) {
+            error.PathNotFound => {
+                try request.respond(.{ .Text = "NOT FOUND" }, 404);
+                continue;
+            },
+            else => return err,
         };
 
         const callback: *const fn (Request, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
@@ -90,34 +93,12 @@ pub fn run(self: *Self) !void {
     } else |err| return err;
 }
 
-pub fn sendResponse(conn: *const std.net.Server.Connection, response_code: u10, content: []const u8) !void {
-    const response = "HTTP/1.1 {} {s} \r\n" ++
-        "Connection: close\r\n" ++
-        "Content-Type: text/html; charset=utf8\r\n" ++
-        "Content-Length: {}\r\n" ++
-        "\r\n";
-
-    const status_description: std.http.Status = @enumFromInt(response_code);
-    _ = try conn.stream.writer().print(response, .{ response_code, @tagName(status_description), content.len });
-    _ = try conn.stream.writer().write(content);
-}
-
-fn send404(conn: *std.net.Server.Connection) !void {
-    const response = "HTTP/1.1 404 NOT FOUND \r\n" ++
-        "Connection: close\r\n" ++
-        "Content-Type: text/html; charset=utf8\r\n" ++
-        "Content-Length: 9\r\n" ++
-        "\r\n" ++
-        "NOT FOUND";
-
-    _ = try conn.stream.writer().print(response, .{});
-}
-
 fn parseHeader(header: []const u8) !HTTPHeader {
     var http_header = HTTPHeader{
         .request_line = undefined,
         .host = undefined,
         .user_agent = undefined,
+        .body = null,
     };
     var header_iter = std.mem.tokenizeSequence(u8, header, "\r\n");
     http_header.request_line = header_iter.next() orelse return error.HeaderMalformed;
@@ -158,6 +139,7 @@ const HTTPHeader = struct {
     request_line: []const u8,
     host: []const u8,
     user_agent: []const u8,
+    body: ?[]const u8,
 };
 
 test "mox.setListener" {

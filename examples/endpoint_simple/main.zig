@@ -75,6 +75,7 @@ fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) void {
 }
 
 fn getCounter(request: mox.Request, _: [][]const u8, counter: *i32) void {
+    std.debug.print("{s}\n", .{request.header.body.?});
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();

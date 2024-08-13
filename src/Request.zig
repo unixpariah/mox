@@ -1,9 +1,11 @@
 const std = @import("std");
 const Client = @import("Client.zig");
+const Header = @import("HTTPHeader.zig");
 
 conn: *const std.net.Server.Connection,
 alloc: std.mem.Allocator,
 client: Client,
+header: Header,
 
 const Self = @This();
 
