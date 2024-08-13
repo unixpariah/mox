@@ -1,22 +1,6 @@
 const std = @import("std");
 const Tree = @import("Tree.zig");
-const StatusCodes = @import("StatusCodes.zig").StatusCodes;
 pub const Request = @import("Request.zig");
-
-const Method = enum {
-    GET,
-    POST,
-    PUT,
-    DELETE,
-    HEAD,
-    OPTIONS,
-    PATCH,
-    TRACE,
-    CONNECT,
-    COPY,
-    LINK,
-    UNLINK,
-};
 
 ip: []const u8 = undefined,
 port: u16 = undefined,
@@ -48,7 +32,7 @@ pub fn deinit(self: *Self) void {
 
 pub fn setListener(
     self: *Self,
-    method: Method,
+    method: std.http.Method,
     path: []const u8,
     comptime T: type,
     listener: *const fn (request: Request, parameters: [][]const u8, data: T) void,
@@ -96,6 +80,7 @@ pub fn run(self: *Self) !void {
 
         const request = Request{
             .conn = conn,
+            .alloc = self.alloc,
         };
 
         const callback: *const fn (Request, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
@@ -110,7 +95,7 @@ pub fn sendResponse(conn: *const std.net.Server.Connection, response_code: u10, 
         "Content-Length: {}\r\n" ++
         "\r\n";
 
-    const status_description: StatusCodes = @enumFromInt(response_code);
+    const status_description: std.http.Status = @enumFromInt(response_code);
     _ = try conn.stream.writer().print(response, .{ response_code, @tagName(status_description), content.len });
     _ = try conn.stream.writer().write(content);
 }
@@ -173,20 +158,50 @@ const HTTPHeader = struct {
     user_agent: []const u8,
 };
 
-test "mox" {
+test "mox.setListener" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    const Data = struct {};
+    var mox = Self.init(alloc);
+    defer mox.deinit();
 
     const test_struct = struct {
-        fn getHello(_: *std.net.Server.Connection, _: [][]const u8, _: *Data) void {}
+        fn getHello(_: Request, _: [][]const u8, _: ?*i32) void {}
     };
+
+    try mox.setListener(.GET, "/hello", ?*i32, test_struct.getHello, null);
+    var void_buffer = std.ArrayList([]const u8).init(alloc);
+    defer void_buffer.deinit();
+    _ = try mox.tree.getPath("GET/hello", &void_buffer);
+
+    try testing.expect(mox.setListener(
+        .GET,
+        "/hello",
+        ?*i32,
+        test_struct.getHello,
+        null,
+    ) == error.ListenerExists);
+    try mox.setListener(.POST, "/hello", ?*i32, test_struct.getHello, null);
+    _ = try mox.tree.getPath("POST/hello", &void_buffer);
+    try mox.setListener(.GET, "/hello/{}", ?*i32, test_struct.getHello, null);
+    try mox.setListener(.GET, "/hello/someone", ?*i32, test_struct.getHello, null);
+
+    var buffer = std.ArrayList([]const u8).init(alloc);
+    defer buffer.deinit();
+    _ = try mox.tree.getPath("GET/hello/world", &buffer);
+    try testing.expect(std.mem.eql(u8, buffer.items[0], "world"));
+    buffer.clearAndFree();
+
+    _ = try mox.tree.getPath("GET/hello/someone", &buffer);
+    try testing.expect(buffer.items.len == 0);
+}
+
+test "mox.bind" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
 
     var server0 = Self.init(alloc);
     defer server0.deinit();
-
-    try testing.expect(server0.run() == error.NotBound);
 
     var port: u16 = 8080;
     while (true) {
@@ -200,52 +215,47 @@ test "mox" {
 
     var server1 = Self.init(alloc);
     defer server1.deinit();
-    try testing.expect(server1.bind("0.0.0.0", port) == error.AddressInUse);
+    try testing.expect(server1.bind("127.0.0.1", port) == error.AddressInUse);
 
-    {
-        var server = Self.init(alloc);
-        defer server.deinit();
-        var port2: u16 = 8080;
-        while (true) {
-            server0.bind("127.0.0.1", port2) catch {
-                port2 += 1;
-                continue;
-            };
+    var server2 = Self.init(alloc);
+    defer server2.deinit();
+    try server2.bind("127.0.0.1", port + 1);
+}
 
-            break;
-        }
+test "mox.run" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
 
-        var data = Data{};
-        try server.setListener(
-            .GET,
-            "/hello",
-            *Data,
-            test_struct.getHello,
-            &data,
-        );
+    const Data = struct {};
 
-        try testing.expect(server.setListener(
-            .GET,
-            "/hello",
-            *Data,
-            test_struct.getHello,
-            &data,
-        ) == error.ListenerExists);
+    const test_struct = struct {
+        fn getHello(_: Request, _: [][]const u8, _: *Data) void {}
+    };
 
-        try server.setListener(
-            .POST,
-            "/hello",
-            *Data,
-            test_struct.getHello,
-            &data,
-        );
+    var server = Self.init(alloc);
+    defer server.deinit();
 
-        try server.setListener(
-            .POST,
-            "/hello/{}",
-            *Data,
-            test_struct.getHello,
-            &data,
-        );
+    try testing.expect(server.run() == error.NotBound);
+
+    var port: u16 = 8080;
+    while (true) {
+        server.bind("127.0.0.1", port) catch {
+            port += 1;
+            continue;
+        };
+
+        break;
     }
+
+    var data = Data{};
+    try server.setListener(
+        .GET,
+        "/hello",
+        *Data,
+        test_struct.getHello,
+        &data,
+    );
+
+    // TODO: Make it run in background
+    // try server.run();
 }

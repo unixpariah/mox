@@ -32,11 +32,11 @@ fn postCounterIncrement(request: mox.Request, parameters: [][]const u8, counter:
     const number = std.fmt.parseInt(i32, parameters[0], 10) catch unreachable;
     counter.* += number;
 
-    request.sendBody(std.fmt.allocPrint(
+    request.respond(.{ .Text = std.fmt.allocPrint(
         alloc,
         "Number incremented by {} by this individual: {}\n",
         .{ number, request.conn.address },
-    ) catch unreachable, 200) catch unreachable;
+    ) catch unreachable }, 200) catch unreachable;
 }
 
 fn postCounterDecrement(request: mox.Request, parameters: [][]const u8, counter: *i32) void {
@@ -47,12 +47,12 @@ fn postCounterDecrement(request: mox.Request, parameters: [][]const u8, counter:
     const number = std.fmt.parseInt(i32, parameters[0], 10) catch unreachable;
     counter.* -= number;
 
-    request.sendBody(
-        std.fmt.allocPrint(
+    request.respond(
+        .{ .Text = std.fmt.allocPrint(
             alloc,
             "Number decremented by {} by this individual: {}\n",
             .{ number, request.conn.address },
-        ) catch unreachable,
+        ) catch unreachable },
         200,
     ) catch unreachable;
 }
@@ -64,12 +64,12 @@ fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) void {
 
     counter.* = 0;
 
-    request.sendBody(
-        std.fmt.allocPrint(
+    request.respond(
+        .{ .Text = std.fmt.allocPrint(
             alloc,
             "Number reseted by this individual: {}\n",
             .{request.conn.address},
-        ) catch unreachable,
+        ) catch unreachable },
         200,
     ) catch unreachable;
 }
@@ -79,12 +79,12 @@ fn getCounter(request: mox.Request, _: [][]const u8, counter: *i32) void {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    request.sendBody(
-        std.fmt.allocPrint(
+    request.respond(
+        .{ .Text = std.fmt.allocPrint(
             alloc,
             "Number is: {}\n",
             .{counter.*},
-        ) catch unreachable,
+        ) catch unreachable },
         200,
     ) catch unreachable;
 }
