@@ -37,11 +37,11 @@ pub fn addPath(self: *Self, path: []const u8, handler: Handler) !void {
     try self.children.put(try alloc.dupe(u8, segment), node);
 }
 
-pub fn getPath(self: *Self, path: []const u8) !Handler {
+pub fn getPath(self: *Self, path: []const u8, buffer: *std.ArrayList([]const u8)) !Handler {
     var path_iter = std.mem.splitScalar(u8, path, '/');
     const segment = path_iter.first();
     if (self.children.getPtr(segment)) |child| {
-        return child.getPath(&path_iter);
+        return child.getPath(&path_iter, buffer);
     }
 
     return error.PathNotFound;
@@ -77,12 +77,18 @@ const Node = struct {
         try self.children.put(try alloc.dupe(u8, segment), node);
     }
 
-    fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar)) !Handler {
+    fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), buffer: *std.ArrayList([]const u8)) !Handler {
         const segment = path_iter.next() orelse return error.PathNotFound;
 
         if (self.children.getPtr(segment)) |child| {
             if (path_iter.peek() == null) return child.data orelse error.PathNotFound;
-            return child.getPath(path_iter);
+            return child.getPath(path_iter, buffer);
+        }
+
+        if (self.children.getPtr("{}")) |child| {
+            try buffer.append(segment);
+            if (path_iter.peek() == null) return child.data orelse error.PathNotFound;
+            return child.getPath(path_iter, buffer);
         }
 
         return error.PathNotFound;
@@ -140,6 +146,13 @@ test "Tree.addPath" {
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
     }) == error.ListenerExists);
+
+    try tree.addPath("GET/{}", .{
+        .callback = @constCast(&test_functions.getNothing),
+        .data = @ptrCast(&data),
+    });
+    try testing.expect(tree.children.get("GET").?.children.get("{}") != null);
+    try testing.expect(tree.children.get("GET").?.children.get("{}").?.data != null);
 }
 
 test "Tree.getPath" {
@@ -160,6 +173,8 @@ test "Tree.getPath" {
     };
 
     var data = Data{};
+    var void_buffer = std.ArrayList([]const u8).init(alloc);
+    defer void_buffer.deinit();
 
     var tree = Self.init(alloc);
     defer tree.deinit();
@@ -169,37 +184,37 @@ test "Tree.getPath" {
         .data = @ptrCast(&data),
     };
     try tree.addPath("GET/", handler);
-    try testing.expect(eql(tree.getPath("GET/"), handler));
+    try testing.expect(eql(tree.getPath("GET/", &void_buffer), handler));
 
     const hello_world_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
     };
     try tree.addPath("GET/hello/world", hello_world_handler);
-    try testing.expect(tree.getPath("GET/hello") == error.PathNotFound);
-    try testing.expect(eql(tree.getPath("GET/hello/world"), hello_world_handler));
+    try testing.expect(tree.getPath("GET/hello", &void_buffer) == error.PathNotFound);
+    try testing.expect(eql(tree.getPath("GET/hello/world", &void_buffer), hello_world_handler));
 
     const bye_world_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
     };
     try tree.addPath("GET/bye/world", bye_world_handler);
-    try testing.expect(tree.getPath("GET/bye") == error.PathNotFound);
-    try testing.expect(eql(tree.getPath("GET/bye/world"), bye_world_handler));
+    try testing.expect(tree.getPath("GET/bye", &void_buffer) == error.PathNotFound);
+    try testing.expect(eql(tree.getPath("GET/bye/world", &void_buffer), bye_world_handler));
 
     const hello_handler: Handler = .{
         .callback = @constCast(&test_functions.getHello),
         .data = @ptrCast(&data),
     };
     try tree.addPath("GET/hello", hello_handler);
-    try testing.expect(eql(tree.getPath("GET/hello"), hello_handler));
+    try testing.expect(eql(tree.getPath("GET/hello", &void_buffer), hello_handler));
 
     const bye_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
     };
     try tree.addPath("GET/bye", bye_handler);
-    try testing.expect(eql(tree.getPath("GET/bye"), bye_handler));
+    try testing.expect(eql(tree.getPath("GET/bye", &void_buffer), bye_handler));
 
     const functions = struct {
         fn getIncrement(counter: *i32) void {
@@ -235,32 +250,113 @@ test "Tree.getPath" {
         try tree.addPath("GET/reset", reset_handler);
     }
 
-    const increment_handler = try tree.getPath("GET/increment");
-    const incrementCallback: *const fn (*i32) void = @ptrCast(increment_handler.callback);
+    {
+        const increment_handler = try tree.getPath("GET/increment", &void_buffer);
+        const incrementCallback: *const fn (*i32) void = @ptrCast(increment_handler.callback);
 
-    const decrement_handler = try tree.getPath("GET/decrement");
-    const decrementCallback: *const fn (*i32) void = @ptrCast(decrement_handler.callback);
+        const decrement_handler = try tree.getPath("GET/decrement", &void_buffer);
+        const decrementCallback: *const fn (*i32) void = @ptrCast(decrement_handler.callback);
 
-    const reset_handler = try tree.getPath("GET/reset");
-    const resetCallback: *const fn (*i32) void = @ptrCast(reset_handler.callback);
+        const reset_handler = try tree.getPath("GET/reset", &void_buffer);
+        const resetCallback: *const fn (*i32) void = @ptrCast(reset_handler.callback);
 
-    try testing.expect(counter == 0);
+        try testing.expect(counter == 0);
 
-    incrementCallback(&counter);
-    try testing.expect(counter == 1);
+        incrementCallback(&counter);
+        try testing.expect(counter == 1);
 
-    incrementCallback(&counter);
-    try testing.expect(counter == 2);
+        incrementCallback(&counter);
+        try testing.expect(counter == 2);
 
-    decrementCallback(&counter);
-    try testing.expect(counter == 1);
+        decrementCallback(&counter);
+        try testing.expect(counter == 1);
 
-    incrementCallback(&counter);
-    try testing.expect(counter == 2);
+        incrementCallback(&counter);
+        try testing.expect(counter == 2);
 
-    decrementCallback(&counter);
-    try testing.expect(counter == 1);
+        decrementCallback(&counter);
+        try testing.expect(counter == 1);
 
-    resetCallback(&counter);
-    try testing.expect(counter == 0);
+        resetCallback(&counter);
+        try testing.expect(counter == 0);
+    }
+
+    const functions2 = struct {
+        fn getIncrement(buffer: [][]const u8, inner_counter: *i32) void {
+            const num = std.fmt.parseInt(i32, buffer[0], 10) catch unreachable;
+            inner_counter.* += num;
+        }
+        fn getDecrement(buffer: [][]const u8, inner_counter: *i32) void {
+            const num = std.fmt.parseInt(i32, buffer[0], 10) catch unreachable;
+            inner_counter.* -= num;
+        }
+        fn getDecrementBy5(inner_counter: *i32) void {
+            inner_counter.* -= 5;
+        }
+    };
+
+    {
+        const increment_handler: Handler = .{
+            .callback = @constCast(&functions2.getIncrement),
+            .data = @ptrCast(&counter),
+        };
+        try tree.addPath("GET/increment/{}", increment_handler);
+
+        const decrement_handler: Handler = .{
+            .callback = @constCast(&functions2.getDecrement),
+            .data = @ptrCast(&counter),
+        };
+        try tree.addPath("GET/decrement/{}", decrement_handler);
+
+        const decrement_by_5_handler: Handler = .{
+            .callback = @constCast(&functions2.getDecrementBy5),
+            .data = @ptrCast(&counter),
+        };
+        try tree.addPath("GET/decrement/by_five", decrement_by_5_handler);
+    }
+
+    {
+        var increment_buffer = std.ArrayList([]const u8).init(alloc);
+        defer increment_buffer.deinit();
+        const increment_handler = try tree.getPath("GET/increment/10", &increment_buffer);
+        const incrementCallback: *const fn ([][]const u8, *i32) void = @ptrCast(increment_handler.callback);
+        try testing.expect(increment_buffer.items.len == 1);
+        try testing.expect(std.mem.eql(u8, increment_buffer.items[0], "10"));
+
+        var decrement_buffer = std.ArrayList([]const u8).init(alloc);
+        defer decrement_buffer.deinit();
+        const decrement_handler = try tree.getPath("GET/decrement/10", &decrement_buffer);
+        const decrementCallback: *const fn ([][]const u8, *i32) void = @ptrCast(decrement_handler.callback);
+        try testing.expect(decrement_buffer.items.len == 1);
+        try testing.expect(std.mem.eql(u8, decrement_buffer.items[0], "10"));
+
+        const decrement_by_5_handler = try tree.getPath("GET/decrement/by_five", &void_buffer);
+        const decrementBy5Callback: *const fn (*i32) void = @ptrCast(decrement_by_5_handler.callback);
+
+        const reset_handler = try tree.getPath("GET/reset", &void_buffer);
+        const resetCallback: *const fn (*i32) void = @ptrCast(reset_handler.callback);
+
+        try testing.expect(counter == 0);
+
+        incrementCallback(increment_buffer.items, &counter);
+        try testing.expect(counter == 10);
+
+        incrementCallback(increment_buffer.items, &counter);
+        try testing.expect(counter == 20);
+
+        decrementCallback(decrement_buffer.items, &counter);
+        try testing.expect(counter == 10);
+
+        incrementCallback(increment_buffer.items, &counter);
+        try testing.expect(counter == 20);
+
+        decrementCallback(decrement_buffer.items, &counter);
+        try testing.expect(counter == 10);
+
+        decrementBy5Callback(&counter);
+        try testing.expect(counter == 5);
+
+        resetCallback(&counter);
+        try testing.expect(counter == 0);
+    }
 }

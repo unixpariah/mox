@@ -1,6 +1,6 @@
 const std = @import("std");
 const Tree = @import("Tree.zig");
-const Handler = @import("Tree.zig").Handler;
+const StatusCodes = @import("StatusCodes.zig").StatusCodes;
 
 const Method = enum {
     GET,
@@ -50,18 +50,19 @@ pub fn setListener(
     method: Method,
     path: []const u8,
     comptime T: type,
-    listener: *const fn (connection: *std.net.Server.Connection, data: T) void,
+    listener: *const fn (connection: *std.net.Server.Connection, parameters: [][]const u8, data: T) void,
     data: T,
 ) !void {
     const callback: ?*anyopaque = @constCast(listener);
-    const handler = Handler{ .callback = callback, .data = data };
 
-    const buf = try self.alloc.alloc(u8, @tagName(method).len + path.len + 1);
-    defer self.alloc.free(buf);
-    _ = try std.fmt.bufPrint(buf, "{s}{s}", .{ @tagName(method), path });
+    const buffer = try std.fmt.allocPrint(
+        self.alloc,
+        "{s}{s}",
+        .{ @tagName(method), path },
+    );
+    defer self.alloc.free(buffer);
 
-    // TODO: Put this onto a tree
-    try self.tree.addPath(buf, handler);
+    try self.tree.addPath(buffer, .{ .callback = callback, .data = data });
 }
 
 pub fn run(self: *Self) !void {
@@ -81,7 +82,9 @@ pub fn run(self: *Self) !void {
         const header = try parseHeader(recv_data);
         const path = try parsePath(header.request_line, self.alloc);
 
-        const handler = self.tree.getPath(path) catch |err| switch (err) {
+        var buffer = std.ArrayList([]const u8).init(self.alloc);
+        defer buffer.deinit();
+        const handler = self.tree.getPath(path, &buffer) catch |err| switch (err) {
             error.PathNotFound => {
                 try send404(@constCast(conn));
                 continue;
@@ -89,12 +92,24 @@ pub fn run(self: *Self) !void {
             else => return err,
         };
 
-        const callback: *const fn (*std.net.Server.Connection, ?*anyopaque) void = @ptrCast(handler.callback);
-        callback(@constCast(conn), handler.data);
+        const callback: *const fn (*std.net.Server.Connection, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
+        callback(@constCast(conn), buffer.items, handler.data);
     } else |err| return err;
 }
 
-pub fn send404(conn: *std.net.Server.Connection) !void {
+pub fn sendResponse(conn: *std.net.Server.Connection, response_code: u10, content: []const u8) !void {
+    const response = "HTTP/1.1 {} {s} \r\n" ++
+        "Connection: close\r\n" ++
+        "Content-Type: text/html; charset=utf8\r\n" ++
+        "Content-Length: {}\r\n" ++
+        "\r\n";
+
+    const status_description: StatusCodes = @enumFromInt(response_code);
+    _ = try conn.stream.writer().print(response, .{ response_code, @tagName(status_description), content.len });
+    _ = try conn.stream.writer().write(content);
+}
+
+fn send404(conn: *std.net.Server.Connection) !void {
     const response = "HTTP/1.1 404 NOT FOUND \r\n" ++
         "Connection: close\r\n" ++
         "Content-Type: text/html; charset=utf8\r\n" ++
@@ -150,17 +165,13 @@ const HTTPHeader = struct {
     request_line: []const u8,
     host: []const u8,
     user_agent: []const u8,
-
-    pub fn print(self: *HTTPHeader) void {
-        std.debug.print("{s} - {s}\n", .{ self.request_line, self.host });
-    }
 };
 
 test "mox" {
     const Data = struct {};
 
     const test_struct = struct {
-        fn getHello(_: *std.net.Server.Connection, _: *Data) void {}
+        fn getHello(_: *std.net.Server.Connection, _: [][]const u8, _: *Data) void {}
     };
 
     const testing = std.testing;

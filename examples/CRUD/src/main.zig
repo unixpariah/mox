@@ -1,5 +1,6 @@
 const std = @import("std");
 const mox = @import("mox");
+const sendResponse = @import("mox").sendResponse;
 
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
@@ -14,26 +15,47 @@ pub fn main() !void {
 
         break;
     }
+
+    std.debug.print("Listening on: {s}:{}", .{ server.ip, server.port });
+
     var counter: i32 = 0;
 
     try server.setListener(.GET, "/increment", *i32, getIncrement, &counter);
-    try server.setListener(.GET, "/decrement", *i32, getDecrement, &counter);
+    try server.setListener(.GET, "/decrement/thing/{}", *i32, getDecrement, &counter);
 
     try server.run();
 }
 
-fn getIncrement(conn: *std.net.Server.Connection, counter: *i32) void {
+fn getIncrement(conn: *std.net.Server.Connection, _: [][]const u8, counter: *i32) void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
     counter.* += 1;
-    std.debug.print(
-        "This nice individual incremented number by 1: {}\nThe number is now {}\n",
-        .{ conn.address, counter.* },
-    );
+    sendResponse(
+        conn,
+        200,
+        std.fmt.allocPrint(
+            alloc,
+            "Number incremented by 1 by this individual: {}, it is now {}\n",
+            .{ conn.address, counter.* },
+        ) catch unreachable,
+    ) catch unreachable;
 }
 
-fn getDecrement(conn: *std.net.Server.Connection, counter: *i32) void {
+fn getDecrement(conn: *std.net.Server.Connection, _: [][]const u8, counter: *i32) void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
     counter.* -= 1;
-    std.debug.print(
-        "This not very nice individual decremented number by 1: {}\nThe number is now {}\n",
-        .{ conn.address, counter.* },
-    );
+    sendResponse(
+        conn,
+        200,
+        std.fmt.allocPrint(
+            alloc,
+            "Number decremented by 1 by this individual: {}, it is now {}\n",
+            .{ conn.address, counter.* },
+        ) catch unreachable,
+    ) catch unreachable;
 }
