@@ -169,27 +169,46 @@ const HTTPHeader = struct {
 };
 
 test "mox" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+
     const Data = struct {};
 
     const test_struct = struct {
         fn getHello(_: *std.net.Server.Connection, _: [][]const u8, _: *Data) void {}
     };
 
-    const testing = std.testing;
-    const alloc = testing.allocator;
-
     var server0 = Self.init(alloc);
     defer server0.deinit();
-    try server0.bind("0.0.0.0", 8080);
+
+    try testing.expect(server0.run() == error.NotBound);
+
+    var port: u16 = 8080;
+    while (true) {
+        server0.bind("127.0.0.1", port) catch {
+            port += 1;
+            continue;
+        };
+
+        break;
+    }
 
     var server1 = Self.init(alloc);
     defer server1.deinit();
-    try testing.expect(server1.bind("0.0.0.0", 8080) == error.AddressInUse);
+    try testing.expect(server1.bind("0.0.0.0", port) == error.AddressInUse);
 
     {
         var server = Self.init(alloc);
         defer server.deinit();
-        try server.bind("0.0.0.0", 8081);
+        var port2: u16 = 8080;
+        while (true) {
+            server0.bind("127.0.0.1", port2) catch {
+                port2 += 1;
+                continue;
+            };
+
+            break;
+        }
 
         var data = Data{};
         try server.setListener(
@@ -200,6 +219,28 @@ test "mox" {
             &data,
         );
 
-        //try server.run();
+        try testing.expect(server.setListener(
+            .GET,
+            "/hello",
+            *Data,
+            test_struct.getHello,
+            &data,
+        ) == error.ListenerExists);
+
+        try server.setListener(
+            .POST,
+            "/hello",
+            *Data,
+            test_struct.getHello,
+            &data,
+        );
+
+        try server.setListener(
+            .POST,
+            "/hello/{}",
+            *Data,
+            test_struct.getHello,
+            &data,
+        );
     }
 }
