@@ -8,7 +8,7 @@ const HeaderNames = enum {
 request_line: []const u8,
 host: []const u8,
 user_agent: []const u8,
-body: ?[]const u8,
+body: []const u8,
 
 const Self = @This();
 
@@ -17,7 +17,7 @@ pub fn parse(header: []const u8) !Self {
         .request_line = undefined,
         .host = undefined,
         .user_agent = undefined,
-        .body = null,
+        .body = undefined,
     };
 
     var header_iter = std.mem.tokenizeSequence(u8, header, "\r\n");
