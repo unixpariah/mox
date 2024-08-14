@@ -1,7 +1,4 @@
 const std = @import("std");
-const crypto = std.crypto;
-const fmt = std.fmt;
-const testing = std.testing;
 
 pub const Error = error{InvalidUUID};
 
@@ -12,7 +9,7 @@ const Self = @This();
 pub fn init() Self {
     var uuid = Self{ .bytes = undefined };
 
-    crypto.random.bytes(&uuid.bytes);
+    std.crypto.random.bytes(&uuid.bytes);
     uuid.bytes[6] = (uuid.bytes[6] & 0x0f) | 0x40;
     uuid.bytes[8] = (uuid.bytes[8] & 0x3f) | 0x80;
     return uuid;
@@ -78,14 +75,14 @@ const hex_to_nibble = [256]u8{
 pub fn format(
     self: Self,
     comptime layout: []const u8,
-    _: fmt.FormatOptions,
+    _: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
     if (layout.len != 0 and layout[0] != 's')
         @compileError("Unsupported format specifier for UUID type: '" ++ layout ++ "'.");
 
     const buf = formatUuid(self);
-    try fmt.format(writer, "{s}", .{buf});
+    try std.fmt.format(writer, "{s}", .{buf});
 }
 
 pub fn parse(buf: []const u8) Error!Self {
@@ -112,7 +109,9 @@ pub fn newV4() Self {
     return Self.init();
 }
 
-test "parse and format" {
+test "UUID.parse" {
+    const testing = std.testing;
+
     const uuids = [_][]const u8{
         "d0cd8041-0504-40cb-ac8e-d05960d205ec",
         "3df6f0e4-f9b1-4e34-ad70-33206069b995",
@@ -125,22 +124,22 @@ test "parse and format" {
     for (uuids) |uuid| {
         try testing.expectFmt(uuid, "{}", .{try Self.parse(uuid)});
     }
-}
 
-test "invalid UUID" {
-    const uuids = [_][]const u8{
+    const wrong_uuids = [_][]const u8{
         "3df6f0e4-f9b1-4e34-ad70-33206069b99",
         "3df6f0e4-f9b1-4e34-ad70-33206069b9912",
         "3df6f0e4-f9b1-4e34-ad70_33206069b9912",
         "zdf6f0e4-f9b1-4e34-ad70-33206069b995",
     };
 
-    for (uuids) |uuid| {
+    for (wrong_uuids) |uuid| {
         try testing.expectError(Error.InvalidUUID, Self.parse(uuid));
     }
 }
 
 test "check toString works" {
+    const testing = std.testing;
+
     const uuid1 = Self.init();
 
     var string1: [36]u8 = undefined;

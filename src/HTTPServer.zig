@@ -8,6 +8,11 @@ port: u16 = undefined,
 listener: ?std.net.Server = null,
 alloc: std.mem.Allocator,
 tree: Tree,
+error_handler: *const fn (Request, anyerror) void,
+
+fn errorHandler(_: Request, _: anyerror) void {
+    unreachable;
+}
 
 const Self = @This();
 
@@ -15,6 +20,7 @@ pub fn init(alloc: std.mem.Allocator) Self {
     return .{
         .alloc = alloc,
         .tree = Tree.init(alloc),
+        .error_handler = errorHandler,
     };
 }
 
@@ -39,8 +45,6 @@ pub fn setListener(
     listener: *const fn (request: Request, parameters: [][]const u8, data: T) anyerror!void,
     data: T,
 ) !void {
-    const callback: ?*anyopaque = @constCast(listener);
-
     const buffer = try std.fmt.allocPrint(
         self.alloc,
         "{s}{s}",
@@ -48,7 +52,30 @@ pub fn setListener(
     );
     defer self.alloc.free(buffer);
 
-    try self.tree.addPath(buffer, .{ .callback = callback, .data = data });
+    try self.tree.addPath(buffer, .{ .callback = @constCast(listener), .data = data, .error_handler = null });
+}
+
+pub fn addErrorHandler(
+    self: *Self,
+    error_handler: *const fn (request: Request, err: anyerror) void,
+) void {
+    self.error_handler = error_handler;
+}
+
+pub fn addListenerErrorHandler(
+    self: *Self,
+    method: std.http.Method,
+    path: []const u8,
+    error_handler: *const fn (request: Request, err: anyerror) void,
+) !void {
+    const buffer = try std.fmt.allocPrint(
+        self.alloc,
+        "{s}{s}",
+        .{ @tagName(method), path },
+    );
+    defer self.alloc.free(buffer);
+
+    try self.tree.addErrorHandler(buffer, @constCast(error_handler));
 }
 
 pub fn run(self: *Self) !void {
@@ -84,8 +111,16 @@ pub fn run(self: *Self) !void {
         };
 
         const callback: *const fn (Request, [][]const u8, ?*anyopaque) anyerror!void = @ptrCast(handler.callback);
-        const err = callback(request, buffer.items, handler.data);
-        std.debug.print("{any}\n", .{err});
+        callback(request, buffer.items, handler.data) catch |err| {
+            if (handler.error_handler != null) {
+                const error_handler: *const fn (err: anyerror) void = @ptrCast(handler.error_handler);
+                error_handler(err);
+                continue;
+            }
+
+            const error_handler: *const fn (err: anyerror) void = @ptrCast(self.error_handler);
+            error_handler(err);
+        };
     } else |err| return err;
 }
 

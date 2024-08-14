@@ -63,7 +63,7 @@ fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) anyerr
 
     try request.respond(
         .{ .Text = try std.fmt.allocPrint(
-            request.a_alloc,
+            request.arena.allocator(),
             "Number reseted by this individual: {}\n",
             .{request.conn.address},
         ) },

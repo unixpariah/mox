@@ -3,9 +3,7 @@ pub const Client = @import("Request/Client.zig");
 pub const Header = @import("Request/HTTPHeader.zig");
 
 conn: *const std.net.Server.Connection,
-a_alloc: std.mem.Allocator,
-alloc: std.mem.Allocator,
-arena: std.heap.ArenaAllocator,
+arena: *std.heap.ArenaAllocator,
 client: Client,
 header: Header,
 
@@ -16,9 +14,7 @@ pub fn init(conn: *const std.net.Server.Connection, header: Header, alloc: std.m
 
     return .{
         .conn = conn,
-        .alloc = alloc,
-        .arena = arena,
-        .a_alloc = arena.allocator(),
+        .arena = &arena,
         .client = Client{},
         .header = header,
     };

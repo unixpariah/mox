@@ -1,7 +1,9 @@
 const std = @import("std");
+const Request = @import("Request.zig");
 
 pub const Handler = struct {
     callback: ?*anyopaque,
+    error_handler: ?*const fn (Request, anyerror) void,
     data: ?*anyopaque,
 };
 
@@ -42,6 +44,16 @@ pub fn getPath(self: *Self, path: []const u8, buffer: *std.ArrayList([]const u8)
     const segment = path_iter.first();
     if (self.children.getPtr(segment)) |child| {
         return child.getPath(&path_iter, buffer);
+    }
+
+    return error.PathNotFound;
+}
+
+fn addErrorHandler(self: *Self, path: []const u8, error_handler: ?*anyopaque) !void {
+    var path_iter = std.mem.splitScalar(u8, path, '/');
+    const segment = path_iter.first();
+    if (self.children.getPtr(segment)) |child| {
+        return child.addErrorHandler(&path_iter, error_handler);
     }
 
     return error.PathNotFound;
@@ -93,6 +105,20 @@ const Node = struct {
 
         return error.PathNotFound;
     }
+
+    fn addErrorHandler(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), error_handler: *?anyopaque) !void {
+        const segment = path_iter.next() orelse return error.PathNotFound;
+
+        if (self.children.getPtr(segment)) |child| {
+            if (path_iter.peek() == null) {
+                if (child.data == null) return error.PathNotFound;
+                child.data.?.error_handler = error_handler;
+            }
+            return child.addErrorHandler(&path_iter, error_handler);
+        }
+
+        return error.PathNotFound;
+    }
 };
 
 test "Tree.addPath" {
@@ -115,6 +141,7 @@ test "Tree.addPath" {
     try tree.addPath("GET/", .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     });
     try testing.expect(tree.children.get("GET") != null);
     try testing.expect(tree.children.get("GET").?.children.get("") != null);
@@ -123,6 +150,7 @@ test "Tree.addPath" {
     try tree.addPath("POST/hello/world", .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     });
     try testing.expect(tree.children.get("POST") != null);
     try testing.expect(tree.children.get("POST").?.children.get("hello") != null);
@@ -132,6 +160,7 @@ test "Tree.addPath" {
     try tree.addPath("POST/bye/world", .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     });
     try testing.expect(tree.children.get("POST").?.children.get("bye") != null);
     try testing.expect(tree.children.get("POST").?.children.get("bye").?.children.get("world") != null);
@@ -140,16 +169,19 @@ test "Tree.addPath" {
     try testing.expect(tree.addPath("POST/bye/world", .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     }) == error.ListenerExists);
 
     try testing.expect(tree.addPath("GET/", .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     }) == error.ListenerExists);
 
     try tree.addPath("GET/{}", .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     });
     try testing.expect(tree.children.get("GET").?.children.get("{}") != null);
     try testing.expect(tree.children.get("GET").?.children.get("{}").?.data != null);
@@ -182,6 +214,7 @@ test "Tree.getPath" {
     const handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     };
     try tree.addPath("GET/", handler);
     try testing.expect(eql(tree.getPath("GET/", &void_buffer), handler));
@@ -189,6 +222,7 @@ test "Tree.getPath" {
     const hello_world_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     };
     try tree.addPath("GET/hello/world", hello_world_handler);
     try testing.expect(tree.getPath("GET/hello", &void_buffer) == error.PathNotFound);
@@ -197,6 +231,7 @@ test "Tree.getPath" {
     const bye_world_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     };
     try tree.addPath("GET/bye/world", bye_world_handler);
     try testing.expect(tree.getPath("GET/bye", &void_buffer) == error.PathNotFound);
@@ -205,6 +240,7 @@ test "Tree.getPath" {
     const hello_handler: Handler = .{
         .callback = @constCast(&test_functions.getHello),
         .data = @ptrCast(&data),
+        .error_handler = null,
     };
     try tree.addPath("GET/hello", hello_handler);
     try testing.expect(eql(tree.getPath("GET/hello", &void_buffer), hello_handler));
@@ -212,6 +248,7 @@ test "Tree.getPath" {
     const bye_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
+        .error_handler = null,
     };
     try tree.addPath("GET/bye", bye_handler);
     try testing.expect(eql(tree.getPath("GET/bye", &void_buffer), bye_handler));
@@ -234,18 +271,21 @@ test "Tree.getPath" {
         const increment_handler: Handler = .{
             .callback = @constCast(&functions.getIncrement),
             .data = @ptrCast(&counter),
+            .error_handler = null,
         };
         try tree.addPath("GET/increment", increment_handler);
 
         const decrement_handler: Handler = .{
             .callback = @constCast(&functions.getDecrement),
             .data = @ptrCast(&counter),
+            .error_handler = null,
         };
         try tree.addPath("GET/decrement", decrement_handler);
 
         const reset_handler: Handler = .{
             .callback = @constCast(&functions.getReset),
             .data = @ptrCast(&counter),
+            .error_handler = null,
         };
         try tree.addPath("GET/reset", reset_handler);
     }
@@ -299,18 +339,21 @@ test "Tree.getPath" {
         const increment_handler: Handler = .{
             .callback = @constCast(&functions2.getIncrement),
             .data = @ptrCast(&counter),
+            .error_handler = null,
         };
         try tree.addPath("GET/increment/{}", increment_handler);
 
         const decrement_handler: Handler = .{
             .callback = @constCast(&functions2.getDecrement),
             .data = @ptrCast(&counter),
+            .error_handler = null,
         };
         try tree.addPath("GET/decrement/{}", decrement_handler);
 
         const decrement_by_5_handler: Handler = .{
             .callback = @constCast(&functions2.getDecrementBy5),
             .data = @ptrCast(&counter),
+            .error_handler = null,
         };
         try tree.addPath("GET/decrement/by_five", decrement_by_5_handler);
     }
