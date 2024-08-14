@@ -68,12 +68,8 @@ pub fn run(self: *Self) !void {
         const header = try Request.Header.parse(recv_data);
         const path = try parsePath(header.request_line, self.alloc);
 
-        const request = Request{
-            .conn = conn,
-            .alloc = self.alloc,
-            .header = header,
-            .client = .{},
-        };
+        const request = Request.init(conn, header, self.alloc);
+        defer request.deinit();
 
         var buffer = std.ArrayList([]const u8).init(self.alloc);
         defer buffer.deinit();

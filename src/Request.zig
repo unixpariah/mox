@@ -3,11 +3,30 @@ pub const Client = @import("Request/Client.zig");
 pub const Header = @import("Request/HTTPHeader.zig");
 
 conn: *const std.net.Server.Connection,
+a_alloc: std.mem.Allocator,
 alloc: std.mem.Allocator,
+arena: std.heap.ArenaAllocator,
 client: Client,
 header: Header,
 
 const Self = @This();
+
+pub fn init(conn: *const std.net.Server.Connection, header: Header, alloc: std.mem.Allocator) Self {
+    var arena = std.heap.ArenaAllocator.init(alloc);
+
+    return .{
+        .conn = conn,
+        .alloc = alloc,
+        .arena = arena,
+        .a_alloc = arena.allocator(),
+        .client = Client{},
+        .header = header,
+    };
+}
+
+pub fn deinit(self: *const Self) void {
+    self.arena.deinit();
+}
 
 pub fn respond(self: *const Self, content: Content, response_code: u10) !void {
     switch (content) {

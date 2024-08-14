@@ -18,7 +18,7 @@ pub fn init() Self {
     return uuid;
 }
 
-fn toString(self: Self, slice: []u8) void {
+pub fn toString(self: Self, slice: []u8) void {
     var string: [36]u8 = formatUuid(self);
     std.mem.copyForwards(u8, slice, &string);
 }
