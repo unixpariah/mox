@@ -25,32 +25,23 @@ pub fn main() !void {
 }
 
 fn postCounterIncrement(request: mox.Request, parameters: [][]const u8, counter: *i32) anyerror!void {
-    std.debug.print("hello!!!\n", .{});
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
     const number = try std.fmt.parseInt(i32, parameters[0], 10);
     counter.* += number;
 
     try request.respond(.{ .Text = try std.fmt.allocPrint(
-        alloc,
+        request.arena.child_allocator,
         "Number incremented by {} by this individual: {}\n",
         .{ number, request.conn.address },
     ) }, 200);
 }
 
 fn postCounterDecrement(request: mox.Request, parameters: [][]const u8, counter: *i32) anyerror!void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
     const number = std.fmt.parseInt(i32, parameters[0], 10) catch unreachable;
     counter.* -= number;
 
     try request.respond(
         .{ .Text = try std.fmt.allocPrint(
-            alloc,
+            request.arena.child_allocator,
             "Number decremented by {} by this individual: {}\n",
             .{ number, request.conn.address },
         ) },
@@ -63,7 +54,7 @@ fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) anyerr
 
     try request.respond(
         .{ .Text = try std.fmt.allocPrint(
-            request.arena.allocator(),
+            request.arena.child_allocator,
             "Number reseted by this individual: {}\n",
             .{request.conn.address},
         ) },
@@ -72,13 +63,9 @@ fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) anyerr
 }
 
 fn getCounter(request: mox.Request, _: [][]const u8, counter: *i32) anyerror!void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
     try request.respond(
         .{ .Text = try std.fmt.allocPrint(
-            alloc,
+            request.arena.child_allocator,
             "Number is: {}\n",
             .{counter.*},
         ) },
