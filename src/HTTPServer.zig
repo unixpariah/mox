@@ -2,6 +2,7 @@ const std = @import("std");
 const Tree = @import("Tree.zig");
 const Header = @import("HTTPHeader.zig");
 pub const Request = @import("Request.zig");
+pub const UUID = @import("UUID.zig");
 pub const Client = @import("Client.zig");
 
 ip: []const u8 = undefined,

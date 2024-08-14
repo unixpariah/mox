@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
     const root_files = [_][]const u8{
         "src/HTTPServer.zig",
         "src/Tree.zig",
+        "src/UUID.zig",
     };
 
     const unit_tests_step = b.step("test", "Run all tests");
