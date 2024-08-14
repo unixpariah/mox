@@ -82,6 +82,9 @@ pub fn addListenerErrorHandler(
 pub fn run(self: *Self) !void {
     var listener = self.listener orelse return error.NotBound;
     while (listener.accept()) |*conn| {
+        var arena = std.heap.ArenaAllocator.init(self.alloc);
+        defer arena.deinit();
+
         var recv_buf: [4096]u8 = undefined;
         var recv_total: usize = 0;
         while (conn.stream.read(recv_buf[recv_total..])) |recv_len| {
@@ -94,12 +97,11 @@ pub fn run(self: *Self) !void {
 
         const recv_data = recv_buf[0..recv_total];
         const header = try Request.Header.parse(recv_data);
-        const path = try parsePath(header.request_line, self.alloc);
+        const path = try parsePath(header.request_line, arena.allocator());
 
-        const request = Request.init(conn, header, self.alloc);
-        defer request.deinit();
+        const request = Request.init(conn, header, &arena);
 
-        var buffer = std.ArrayList([]const u8).init(self.alloc);
+        var buffer = std.ArrayList([]const u8).init(arena.allocator());
         defer buffer.deinit();
 
         //                                Remove trailing uninitialized memory

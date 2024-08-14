@@ -20,8 +20,13 @@ pub fn main() !void {
     try server.setListener(.POST, "/counter/decrement/{}", *i32, postCounterDecrement, &counter);
     try server.setListener(.POST, "/counter/reset", *i32, postCounterReset, &counter);
     try server.setListener(.GET, "/counter", *i32, getCounter, &counter);
+    try server.setListener(.GET, "/exit", *mox, getExit, &server);
 
     try server.run();
+}
+
+fn getExit(_: mox.Request, _: [][]const u8, server: *mox) !void {
+    server.stop();
 }
 
 fn postCounterIncrement(request: mox.Request, parameters: [][]const u8, counter: *i32) anyerror!void {
