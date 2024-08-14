@@ -9,6 +9,7 @@ listener: ?std.net.Server = null,
 alloc: std.mem.Allocator,
 tree: Tree,
 error_handler: *const fn (Request, anyerror) void,
+exit: bool = false,
 
 fn errorHandler(_: Request, _: anyerror) void {
     unreachable;
@@ -121,7 +122,13 @@ pub fn run(self: *Self) !void {
             const error_handler: *const fn (err: anyerror) void = @ptrCast(self.error_handler);
             error_handler(err);
         };
+
+        if (self.exit) break;
     } else |err| return err;
+}
+
+pub fn stop(self: *Self) void {
+    self.exit = true;
 }
 
 fn parseHeader(header: []const u8) !HTTPHeader {
