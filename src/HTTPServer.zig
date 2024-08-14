@@ -1,9 +1,7 @@
 const std = @import("std");
 const Tree = @import("Tree.zig");
-const Header = @import("HTTPHeader.zig");
 pub const Request = @import("Request.zig");
 pub const UUID = @import("UUID.zig");
-pub const Client = @import("Client.zig");
 
 ip: []const u8 = undefined,
 port: u16 = undefined,
@@ -67,7 +65,7 @@ pub fn run(self: *Self) !void {
         } else |err| return err;
 
         const recv_data = recv_buf[0..recv_total];
-        const header = try Header.parse(recv_data);
+        const header = try Request.Header.parse(recv_data);
         const path = try parsePath(header.request_line, self.alloc);
 
         const request = Request{

@@ -1,6 +1,6 @@
 const std = @import("std");
-const Client = @import("Client.zig");
-const Header = @import("HTTPHeader.zig");
+pub const Client = @import("Request/Client.zig");
+pub const Header = @import("Request/HTTPHeader.zig");
 
 conn: *const std.net.Server.Connection,
 alloc: std.mem.Allocator,
