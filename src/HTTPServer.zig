@@ -36,7 +36,7 @@ pub fn setListener(
     method: std.http.Method,
     path: []const u8,
     comptime T: type,
-    listener: *const fn (request: Request, parameters: [][]const u8, data: T) void,
+    listener: *const fn (request: Request, parameters: [][]const u8, data: T) anyerror!void,
     data: T,
 ) !void {
     const callback: ?*anyopaque = @constCast(listener);
@@ -83,8 +83,9 @@ pub fn run(self: *Self) !void {
             else => return err,
         };
 
-        const callback: *const fn (Request, [][]const u8, ?*anyopaque) void = @ptrCast(handler.callback);
-        callback(request, buffer.items, handler.data);
+        const callback: *const fn (Request, [][]const u8, ?*anyopaque) anyerror!void = @ptrCast(handler.callback);
+        const err = callback(request, buffer.items, handler.data);
+        std.debug.print("{any}\n", .{err});
     } else |err| return err;
 }
 
@@ -145,7 +146,7 @@ test "mox.setListener" {
     defer mox.deinit();
 
     const test_struct = struct {
-        fn getHello(_: Request, _: [][]const u8, _: ?*i32) void {}
+        fn getHello(_: Request, _: [][]const u8, _: ?*i32) anyerror!void {}
     };
 
     try mox.setListener(.GET, "/hello", ?*i32, test_struct.getHello, null);
@@ -208,7 +209,7 @@ test "mox.run" {
     const Data = struct {};
 
     const test_struct = struct {
-        fn getHello(_: Request, _: [][]const u8, _: *Data) void {}
+        fn getHello(_: Request, _: [][]const u8, _: *Data) anyerror!void {}
     };
 
     var server = Self.init(alloc);
