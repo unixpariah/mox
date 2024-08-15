@@ -39,7 +39,7 @@ pub fn addPath(self: *Self, path: []const u8, handler: Handler) !void {
     try self.children.put(try alloc.dupe(u8, segment), node);
 }
 
-pub fn getPath(self: *Self, path: []const u8, buffer: *std.ArrayList([]const u8)) !Handler {
+pub fn getPath(self: *Self, path: []const u8, buffer: *std.ArrayList([]const u8)) !*Handler {
     var path_iter = std.mem.splitScalar(u8, path, '/');
     const segment = path_iter.first();
     if (self.children.getPtr(segment)) |child| {
@@ -89,17 +89,17 @@ const Node = struct {
         try self.children.put(try alloc.dupe(u8, segment), node);
     }
 
-    fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), buffer: *std.ArrayList([]const u8)) !Handler {
+    fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), buffer: *std.ArrayList([]const u8)) !*Handler {
         const segment = path_iter.next() orelse return error.PathNotFound;
 
         if (self.children.getPtr(segment)) |child| {
-            if (path_iter.peek() == null) return child.data orelse error.PathNotFound;
+            if (path_iter.peek() == null) return if (child.data) |*data| data else error.PathNotFound;
             return child.getPath(path_iter, buffer);
         }
 
         if (self.children.getPtr("{}")) |child| {
             try buffer.append(segment);
-            if (path_iter.peek() == null) return child.data orelse error.PathNotFound;
+            if (path_iter.peek() == null) return if (child.data) |*data| data else error.PathNotFound;
             return child.getPath(path_iter, buffer);
         }
 
@@ -217,7 +217,7 @@ test "Tree.getPath" {
         .error_handler = null,
     };
     try tree.addPath("GET/", handler);
-    try testing.expect(eql(tree.getPath("GET/", &void_buffer), handler));
+    try testing.expect(eql((try tree.getPath("GET/", &void_buffer)).*, handler));
 
     const hello_world_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
@@ -226,7 +226,7 @@ test "Tree.getPath" {
     };
     try tree.addPath("GET/hello/world", hello_world_handler);
     try testing.expect(tree.getPath("GET/hello", &void_buffer) == error.PathNotFound);
-    try testing.expect(eql(tree.getPath("GET/hello/world", &void_buffer), hello_world_handler));
+    try testing.expect(eql((try tree.getPath("GET/hello/world", &void_buffer)).*, hello_world_handler));
 
     const bye_world_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
@@ -235,7 +235,7 @@ test "Tree.getPath" {
     };
     try tree.addPath("GET/bye/world", bye_world_handler);
     try testing.expect(tree.getPath("GET/bye", &void_buffer) == error.PathNotFound);
-    try testing.expect(eql(tree.getPath("GET/bye/world", &void_buffer), bye_world_handler));
+    try testing.expect(eql((try tree.getPath("GET/bye/world", &void_buffer)).*, bye_world_handler));
 
     const hello_handler: Handler = .{
         .callback = @constCast(&test_functions.getHello),
@@ -243,7 +243,7 @@ test "Tree.getPath" {
         .error_handler = null,
     };
     try tree.addPath("GET/hello", hello_handler);
-    try testing.expect(eql(tree.getPath("GET/hello", &void_buffer), hello_handler));
+    try testing.expect(eql((try tree.getPath("GET/hello", &void_buffer)).*, hello_handler));
 
     const bye_handler: Handler = .{
         .callback = @constCast(&test_functions.getNothing),
@@ -251,7 +251,7 @@ test "Tree.getPath" {
         .error_handler = null,
     };
     try tree.addPath("GET/bye", bye_handler);
-    try testing.expect(eql(tree.getPath("GET/bye", &void_buffer), bye_handler));
+    try testing.expect(eql((try tree.getPath("GET/bye", &void_buffer)).*, bye_handler));
 
     const functions = struct {
         fn getIncrement(counter: *i32) void {
