@@ -53,7 +53,7 @@ pub fn setListener(
     );
     defer self.alloc.free(buffer);
 
-    try self.tree.addPath(buffer, .{ .callback = @constCast(listener), .data = data, .error_handler = null });
+    try self.tree.addPath(buffer, .{ .callback = @ptrCast(listener), .data = @ptrCast(data), .error_handler = null });
 }
 
 pub fn addErrorHandler(
@@ -76,7 +76,7 @@ pub fn addListenerErrorHandler(
     );
     defer self.alloc.free(buffer);
 
-    try self.tree.addErrorHandler(buffer, @constCast(error_handler));
+    try self.tree.addErrorHandler(buffer, @ptrCast(error_handler));
 }
 
 pub fn run(self: *Self) !void {

@@ -2,7 +2,7 @@ const std = @import("std");
 const Request = @import("Request.zig");
 
 pub const Handler = struct {
-    callback: ?*anyopaque,
+    callback: *const fn (request: Request, parameters: [][]const u8, counter: *i32) anyerror!void,
     error_handler: ?*const fn (Request, anyerror) void,
     data: ?*anyopaque,
 };
@@ -130,7 +130,7 @@ test "Tree.addPath" {
     };
 
     const test_functions = struct {
-        fn getNothing(_: ?*anyopaque) void {}
+        fn getNothing(_: Request, _: [][]const u8, _: ?*anyopaque) !void {}
     };
 
     var data = Data{};
@@ -139,7 +139,7 @@ test "Tree.addPath" {
     defer tree.deinit();
 
     try tree.addPath("GET/", .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     });
@@ -148,7 +148,7 @@ test "Tree.addPath" {
     try testing.expect(tree.children.get("GET").?.children.get("").?.data != null);
 
     try tree.addPath("POST/hello/world", .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     });
@@ -158,7 +158,7 @@ test "Tree.addPath" {
     try testing.expect(tree.children.get("POST").?.children.get("hello").?.children.get("world").?.data != null);
 
     try tree.addPath("POST/bye/world", .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     });
@@ -167,19 +167,19 @@ test "Tree.addPath" {
     try testing.expect(tree.children.get("POST").?.children.get("bye").?.children.get("world").?.data != null);
 
     try testing.expect(tree.addPath("POST/bye/world", .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     }) == error.ListenerExists);
 
     try testing.expect(tree.addPath("GET/", .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     }) == error.ListenerExists);
 
     try tree.addPath("GET/{}", .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     });
@@ -212,7 +212,7 @@ test "Tree.getPath" {
     defer tree.deinit();
 
     const handler: Handler = .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     };
@@ -220,7 +220,7 @@ test "Tree.getPath" {
     try testing.expect(eql((try tree.getPath("GET/", &void_buffer)).*, handler));
 
     const hello_world_handler: Handler = .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     };
@@ -229,7 +229,7 @@ test "Tree.getPath" {
     try testing.expect(eql((try tree.getPath("GET/hello/world", &void_buffer)).*, hello_world_handler));
 
     const bye_world_handler: Handler = .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     };
@@ -238,7 +238,7 @@ test "Tree.getPath" {
     try testing.expect(eql((try tree.getPath("GET/bye/world", &void_buffer)).*, bye_world_handler));
 
     const hello_handler: Handler = .{
-        .callback = @constCast(&test_functions.getHello),
+        .callback = @ptrCast(&test_functions.getHello),
         .data = @ptrCast(&data),
         .error_handler = null,
     };
@@ -246,7 +246,7 @@ test "Tree.getPath" {
     try testing.expect(eql((try tree.getPath("GET/hello", &void_buffer)).*, hello_handler));
 
     const bye_handler: Handler = .{
-        .callback = @constCast(&test_functions.getNothing),
+        .callback = @ptrCast(&test_functions.getNothing),
         .data = @ptrCast(&data),
         .error_handler = null,
     };
@@ -269,21 +269,21 @@ test "Tree.getPath" {
 
     {
         const increment_handler: Handler = .{
-            .callback = @constCast(&functions.getIncrement),
+            .callback = @ptrCast(&functions.getIncrement),
             .data = @ptrCast(&counter),
             .error_handler = null,
         };
         try tree.addPath("GET/increment", increment_handler);
 
         const decrement_handler: Handler = .{
-            .callback = @constCast(&functions.getDecrement),
+            .callback = @ptrCast(&functions.getDecrement),
             .data = @ptrCast(&counter),
             .error_handler = null,
         };
         try tree.addPath("GET/decrement", decrement_handler);
 
         const reset_handler: Handler = .{
-            .callback = @constCast(&functions.getReset),
+            .callback = @ptrCast(&functions.getReset),
             .data = @ptrCast(&counter),
             .error_handler = null,
         };
@@ -337,21 +337,21 @@ test "Tree.getPath" {
 
     {
         const increment_handler: Handler = .{
-            .callback = @constCast(&functions2.getIncrement),
+            .callback = @ptrCast(&functions2.getIncrement),
             .data = @ptrCast(&counter),
             .error_handler = null,
         };
         try tree.addPath("GET/increment/{}", increment_handler);
 
         const decrement_handler: Handler = .{
-            .callback = @constCast(&functions2.getDecrement),
+            .callback = @ptrCast(&functions2.getDecrement),
             .data = @ptrCast(&counter),
             .error_handler = null,
         };
         try tree.addPath("GET/decrement/{}", decrement_handler);
 
         const decrement_by_5_handler: Handler = .{
-            .callback = @constCast(&functions2.getDecrementBy5),
+            .callback = @ptrCast(&functions2.getDecrementBy5),
             .data = @ptrCast(&counter),
             .error_handler = null,
         };
