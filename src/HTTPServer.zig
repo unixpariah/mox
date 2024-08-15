@@ -1,17 +1,17 @@
 const std = @import("std");
 const Tree = @import("Tree.zig");
-pub const Request = @import("Request.zig");
-pub const UUID = @import("UUID.zig");
+const Request = @import("Request.zig");
+const UUID = @import("UUID.zig");
 
 ip: []const u8 = undefined,
 port: u16 = undefined,
 listener: ?std.net.Server = null,
 alloc: std.mem.Allocator,
 tree: Tree,
-error_handler: *const fn (Request, anyerror) void,
+error_handler: struct { function: *const fn (Request, anyerror, ?*anyopaque) void, data: ?*anyopaque },
 exit: bool = false,
 
-fn errorHandler(_: Request, _: anyerror) void {
+fn errorHandler(_: Request, _: anyerror, _: ?*anyopaque) void {
     unreachable;
 }
 
@@ -21,7 +21,10 @@ pub fn init(alloc: std.mem.Allocator) Self {
     return .{
         .alloc = alloc,
         .tree = Tree.init(alloc),
-        .error_handler = errorHandler,
+        .error_handler = .{
+            .function = @ptrCast(&errorHandler),
+            .data = null,
+        },
     };
 }
 
@@ -58,25 +61,14 @@ pub fn setListener(
 
 pub fn addErrorHandler(
     self: *Self,
-    error_handler: *const fn (request: Request, err: anyerror) void,
+    comptime T: type,
+    error_handler: *const fn (request: Request, err: anyerror, data: T) void,
+    data: T,
 ) void {
-    self.error_handler = error_handler;
-}
-
-pub fn addListenerErrorHandler(
-    self: *Self,
-    method: std.http.Method,
-    path: []const u8,
-    error_handler: *const fn (request: Request, err: anyerror) void,
-) !void {
-    const buffer = try std.fmt.allocPrint(
-        self.alloc,
-        "{s}{s}",
-        .{ @tagName(method), path },
-    );
-    defer self.alloc.free(buffer);
-
-    try self.tree.addErrorHandler(buffer, @ptrCast(error_handler));
+    self.error_handler = .{
+        .data = @ptrCast(data),
+        .function = error_handler,
+    };
 }
 
 pub fn run(self: *Self) !void {
@@ -121,8 +113,8 @@ pub fn run(self: *Self) !void {
                 continue;
             }
 
-            const error_handler: *const fn (err: anyerror) void = @ptrCast(self.error_handler);
-            error_handler(err);
+            const error_handler: *const fn (Request, anyerror, ?*anyopaque) void = @ptrCast(self.error_handler.function);
+            error_handler(request, err, self.error_handler.data);
         };
 
         if (self.exit) break;
@@ -282,4 +274,17 @@ test "mox.run" {
 
     // TODO: Make it run in background
     // try server.run();
+}
+
+test "mox.addErrorHandler" {
+    const testing = std.testing;
+
+    const err = struct {
+        fn error_handler(_: Request, _: anyerror, _: ?*anyopaque) void {}
+    };
+
+    var mox = Self.init(testing.allocator);
+    mox.addErrorHandler(?*anyopaque, err.error_handler, null);
+
+    try testing.expectEqual(err.error_handler, mox.error_handler.function);
 }

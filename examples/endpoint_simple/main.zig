@@ -2,7 +2,7 @@ const std = @import("std");
 const mox = @import("mox");
 
 pub fn main() !void {
-    var server = mox.init(std.heap.page_allocator);
+    var server = mox.HTTPServer.init(std.heap.page_allocator);
     var port: u16 = 8080;
     while (true) {
         server.bind("127.0.0.1", port) catch {
@@ -20,12 +20,12 @@ pub fn main() !void {
     try server.setListener(.POST, "/counter/decrement/{}", *i32, postCounterDecrement, &counter);
     try server.setListener(.POST, "/counter/reset", *i32, postCounterReset, &counter);
     try server.setListener(.GET, "/counter", *i32, getCounter, &counter);
-    try server.setListener(.GET, "/exit", *mox, getExit, &server);
+    try server.setListener(.GET, "/exit", *mox.HTTPServer, getExit, &server);
 
     try server.run();
 }
 
-fn getExit(_: mox.Request, _: [][]const u8, server: *mox) !void {
+fn getExit(_: mox.Request, _: [][]const u8, server: *mox.HTTPServer) !void {
     server.stop();
 }
 

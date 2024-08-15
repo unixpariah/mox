@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const mox = b.addModule("mox", .{
-        .root_source_file = b.path("src/HTTPServer.zig"),
+        .root_source_file = b.path("src/mox.zig"),
         .target = target,
         .optimize = optimize,
     });
