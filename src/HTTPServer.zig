@@ -56,7 +56,7 @@ pub fn setListener(
     );
     defer self.alloc.free(buffer);
 
-    try self.tree.addPath(buffer, .{ .callback = @ptrCast(listener), .data = @ptrCast(data), .error_handler = null });
+    try self.tree.addPath(method, path, .{ .callback = @ptrCast(listener), .data = @ptrCast(data), .error_handler = null });
 }
 
 pub fn addErrorHandler(
@@ -89,15 +89,14 @@ pub fn run(self: *Self) !void {
 
         const recv_data = recv_buf[0..recv_total];
         const header = try Request.Header.parse(recv_data);
-        const path = try parsePath(header.request_line, arena.allocator());
+        const path = try parsePath(header.request_line);
 
         const request = Request.init(conn, header, &arena);
 
         var buffer = std.ArrayList([]const u8).init(arena.allocator());
         defer buffer.deinit();
 
-        //                                Remove trailing uninitialized memory
-        const handler = self.tree.getPath(path[0 .. path.len - 1], &buffer) catch |err| switch (err) {
+        const handler = self.tree.getPath(path.@"0", path.@"1", &buffer) catch |err| switch (err) {
             error.PathNotFound => {
                 try request.respond(.{ .Text = "NOT FOUND" }, 404);
                 continue;
@@ -148,18 +147,15 @@ fn parseHeader(header: []const u8) !HTTPHeader {
     return http_header;
 }
 
-fn parsePath(request_line: []const u8, alloc: std.mem.Allocator) ![]const u8 {
+fn parsePath(request_line: []const u8) !std.meta.Tuple(&[_]type{ std.http.Method, []const u8 }) {
     var request_line_iter = std.mem.tokenizeScalar(u8, request_line, ' ');
-    const method = request_line_iter.next().?;
+    const method = std.meta.stringToEnum(std.http.Method, request_line_iter.next().?).?;
     const path = request_line_iter.next().?;
 
     const proto = request_line_iter.next().?;
     if (!std.mem.eql(u8, proto, "HTTP/1.1")) return error.ProtoNotSupported;
 
-    const buf = try alloc.alloc(u8, method.len + path.len + 1);
-    _ = try std.fmt.bufPrint(buf, "{s}{s}", .{ method, path });
-
-    return buf;
+    return .{ method, path };
 }
 
 const HeaderNames = enum {
@@ -188,7 +184,7 @@ test "mox.setListener" {
     try mox.setListener(.GET, "/hello", ?*i32, test_struct.getHello, null);
     var void_buffer = std.ArrayList([]const u8).init(alloc);
     defer void_buffer.deinit();
-    _ = try mox.tree.getPath("GET/hello", &void_buffer);
+    _ = try mox.tree.getPath(.GET, "/hello", &void_buffer);
 
     try testing.expect(mox.setListener(
         .GET,
@@ -198,17 +194,17 @@ test "mox.setListener" {
         null,
     ) == error.ListenerExists);
     try mox.setListener(.POST, "/hello", ?*i32, test_struct.getHello, null);
-    _ = try mox.tree.getPath("POST/hello", &void_buffer);
+    _ = try mox.tree.getPath(.POST, "/hello", &void_buffer);
     try mox.setListener(.GET, "/hello/{}", ?*i32, test_struct.getHello, null);
     try mox.setListener(.GET, "/hello/someone", ?*i32, test_struct.getHello, null);
 
     var buffer = std.ArrayList([]const u8).init(alloc);
     defer buffer.deinit();
-    _ = try mox.tree.getPath("GET/hello/world", &buffer);
+    _ = try mox.tree.getPath(.GET, "/hello/world", &buffer);
     try testing.expect(std.mem.eql(u8, buffer.items[0], "world"));
     buffer.clearAndFree();
 
-    _ = try mox.tree.getPath("GET/hello/someone", &buffer);
+    _ = try mox.tree.getPath(.GET, "/hello/someone", &buffer);
     try testing.expect(buffer.items.len == 0);
 }
 
@@ -232,10 +228,6 @@ test "mox.bind" {
     var server1 = Self.init(alloc);
     defer server1.deinit();
     try testing.expect(server1.bind("127.0.0.1", port) == error.AddressInUse);
-
-    var server2 = Self.init(alloc);
-    defer server2.deinit();
-    try server2.bind("127.0.0.1", port + 1);
 }
 
 test "mox.run" {

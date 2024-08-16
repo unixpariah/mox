@@ -14,6 +14,7 @@ pub fn build(b: *std.Build) void {
         "src/HTTPServer.zig",
         "src/Tree.zig",
         "src/UUID.zig",
+        "src/Request/Client.zig",
     };
 
     const unit_tests_step = b.step("test", "Run all tests");
