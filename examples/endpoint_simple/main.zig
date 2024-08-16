@@ -16,11 +16,11 @@ pub fn main() !void {
     std.debug.print("Listening on: {s}:{}", .{ server.ip, server.port });
 
     var counter: i32 = 0;
-    try server.setListener(.POST, "/counter/increment/{}", *i32, postCounterIncrement, &counter);
-    try server.setListener(.POST, "/counter/decrement/{}", *i32, postCounterDecrement, &counter);
-    try server.setListener(.POST, "/counter/reset", *i32, postCounterReset, &counter);
-    try server.setListener(.GET, "/counter", *i32, getCounter, &counter);
-    try server.setListener(.GET, "/exit", *mox.HTTPServer, getExit, &server);
+    _ = try server.setListener(.POST, "/counter/increment/{}", *i32, postCounterIncrement, &counter);
+    _ = try server.setListener(.POST, "/counter/decrement/{}", *i32, postCounterDecrement, &counter);
+    _ = try server.setListener(.POST, "/counter/reset", *i32, postCounterReset, &counter);
+    _ = try server.setListener(.GET, "/counter", *i32, getCounter, &counter);
+    _ = try server.setListener(.GET, "/exit", *mox.HTTPServer, getExit, &server);
 
     try server.run();
 }

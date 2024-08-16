@@ -2,6 +2,7 @@ const std = @import("std");
 const Tree = @import("Tree.zig");
 const Request = @import("Request.zig");
 const UUID = @import("UUID.zig");
+const Handler = @import("Tree.zig").Handler;
 
 ip: []const u8 = undefined,
 port: u16 = undefined,
@@ -48,7 +49,7 @@ pub fn setListener(
     comptime T: type,
     listener: *const fn (request: Request, parameters: [][]const u8, data: T) anyerror!void,
     data: T,
-) !void {
+) !*Handler {
     const buffer = try std.fmt.allocPrint(
         self.alloc,
         "{s}{s}",
@@ -56,7 +57,7 @@ pub fn setListener(
     );
     defer self.alloc.free(buffer);
 
-    try self.tree.addPath(method, path, .{ .callback = @ptrCast(listener), .data = @ptrCast(data), .error_handler = null });
+    return self.tree.addPath(method, path, .{ .callback = @ptrCast(listener), .data = @ptrCast(data), .error_handler = null });
 }
 
 pub fn addErrorHandler(
@@ -181,7 +182,7 @@ test "mox.setListener" {
         fn getHello(_: Request, _: [][]const u8, _: ?*i32) anyerror!void {}
     };
 
-    try mox.setListener(.GET, "/hello", ?*i32, test_struct.getHello, null);
+    _ = try mox.setListener(.GET, "/hello", ?*i32, test_struct.getHello, null);
     var void_buffer = std.ArrayList([]const u8).init(alloc);
     defer void_buffer.deinit();
     _ = try mox.tree.getPath(.GET, "/hello", &void_buffer);
@@ -193,10 +194,10 @@ test "mox.setListener" {
         test_struct.getHello,
         null,
     ) == error.ListenerExists);
-    try mox.setListener(.POST, "/hello", ?*i32, test_struct.getHello, null);
+    _ = try mox.setListener(.POST, "/hello", ?*i32, test_struct.getHello, null);
     _ = try mox.tree.getPath(.POST, "/hello", &void_buffer);
-    try mox.setListener(.GET, "/hello/{}", ?*i32, test_struct.getHello, null);
-    try mox.setListener(.GET, "/hello/someone", ?*i32, test_struct.getHello, null);
+    _ = try mox.setListener(.GET, "/hello/{}", ?*i32, test_struct.getHello, null);
+    _ = try mox.setListener(.GET, "/hello/someone", ?*i32, test_struct.getHello, null);
 
     var buffer = std.ArrayList([]const u8).init(alloc);
     defer buffer.deinit();
@@ -256,7 +257,7 @@ test "mox.run" {
     }
 
     var data = Data{};
-    try server.setListener(
+    _ = try server.setListener(
         .GET,
         "/hello",
         *Data,
