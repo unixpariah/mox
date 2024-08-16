@@ -16,8 +16,7 @@ pub fn main() !void {
     std.debug.print("Listening on: {s}:{}", .{ server.ip, server.port });
 
     var counter: i32 = 0;
-    _ = try server.setListener(.POST, "/counter/increment/{}", *i32, postCounterIncrement, &counter);
-    _ = try server.setListener(.POST, "/counter/decrement/{}", *i32, postCounterDecrement, &counter);
+    _ = try (try server.setListener(.POST, "/counter/modify/{}", *i32, postCounterModify, &counter)).addErrorHandler(*i32, err, &counter);
     _ = try server.setListener(.POST, "/counter/reset", *i32, postCounterReset, &counter);
     _ = try server.setListener(.GET, "/counter", *i32, getCounter, &counter);
     _ = try server.setListener(.GET, "/exit", *mox.HTTPServer, getExit, &server);
@@ -25,11 +24,18 @@ pub fn main() !void {
     try server.run();
 }
 
+fn err(request: mox.Request, errr: anyerror, counter: *i32) !void {
+    if (errr == error.Over10) {
+        counter.* = 0;
+        try request.respond(.{ .Text = "Over 10" }, 200);
+    }
+}
+
 fn getExit(_: mox.Request, _: [][]const u8, server: *mox.HTTPServer) !void {
     server.stop();
 }
 
-fn postCounterIncrement(request: mox.Request, parameters: [][]const u8, counter: *i32) anyerror!void {
+fn postCounterModify(request: mox.Request, parameters: [][]const u8, counter: *i32) anyerror!void {
     const number = try std.fmt.parseInt(i32, parameters[0], 10);
     counter.* += number;
 
@@ -38,20 +44,8 @@ fn postCounterIncrement(request: mox.Request, parameters: [][]const u8, counter:
         "Number incremented by {} by this individual: {}\n",
         .{ number, request.conn.address },
     ) }, 200);
-}
 
-fn postCounterDecrement(request: mox.Request, parameters: [][]const u8, counter: *i32) anyerror!void {
-    const number = std.fmt.parseInt(i32, parameters[0], 10) catch unreachable;
-    counter.* -= number;
-
-    try request.respond(
-        .{ .Text = try std.fmt.allocPrint(
-            request.arena.child_allocator,
-            "Number decremented by {} by this individual: {}\n",
-            .{ number, request.conn.address },
-        ) },
-        200,
-    );
+    if (counter.* > 10) return error.Over10;
 }
 
 fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) anyerror!void {

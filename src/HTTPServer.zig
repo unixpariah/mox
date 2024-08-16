@@ -57,7 +57,12 @@ pub fn setListener(
     );
     defer self.alloc.free(buffer);
 
-    return self.tree.addPath(method, path, .{ .callback = @ptrCast(listener), .data = @ptrCast(data), .error_handler = null });
+    return self.tree.addPath(method, path, .{
+        .alloc = self.alloc,
+        .callback = @ptrCast(listener),
+        .data = @ptrCast(data),
+        .error_handler = null,
+    });
 }
 
 pub fn addErrorHandler(
@@ -107,14 +112,10 @@ pub fn run(self: *Self) !void {
 
         const callback: *const fn (Request, [][]const u8, ?*anyopaque) anyerror!void = @ptrCast(handler.callback);
         callback(request, buffer.items, handler.data) catch |err| {
-            if (handler.error_handler != null) {
-                const error_handler: *const fn (err: anyerror) void = @ptrCast(handler.error_handler);
-                error_handler(err);
-                continue;
-            }
-
-            const error_handler: *const fn (Request, anyerror, ?*anyopaque) void = @ptrCast(self.error_handler.function);
-            error_handler(request, err, self.error_handler.data);
+            handler.handleError(request, err) catch |inner_err| {
+                const error_handler: *const fn (Request, anyerror, ?*anyopaque) void = @ptrCast(self.error_handler.function);
+                error_handler(request, inner_err, self.error_handler.data);
+            };
         };
 
         if (self.exit) break;
