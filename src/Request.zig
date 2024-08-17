@@ -1,9 +1,11 @@
 const std = @import("std");
 pub const Client = @import("Request/Client.zig");
 pub const Header = @import("Request/HTTPHeader.zig");
+const Content = @import("Request/Content.zig");
 
 conn: *const std.net.Server.Connection,
-arena: *std.heap.ArenaAllocator,
+arena_alloc: std.mem.Allocator,
+alloc: std.mem.Allocator,
 client: Client,
 header: Header,
 
@@ -12,16 +14,19 @@ const Self = @This();
 pub fn init(conn: *const std.net.Server.Connection, header: Header, arena: *std.heap.ArenaAllocator) Self {
     return .{
         .conn = conn,
-        .arena = arena,
+        .arena_alloc = arena.allocator(),
+        .alloc = arena.child_allocator,
         .client = Client{},
         .header = header,
     };
 }
 
-pub fn respond(self: *const Self, content: Content, response_code: u10) !void {
-    switch (content) {
-        .Text => |text| return self.respondBody(text, response_code),
-        .Json => |json| return self.respondJson(json, response_code),
+// TODO
+pub fn reply(self: *const Self, content: Content, response_code: u10) !void {
+    switch (content.content_type) {
+        .TEXT => return self.respondBody(content.payload, response_code),
+        .JSON => return self.respondJson(content.payload, response_code),
+        .HTML => {},
     }
 }
 
@@ -48,8 +53,3 @@ fn respondBody(self: *const Self, body: []const u8, response_code: u10) !void {
     _ = try self.conn.stream.writer().print(response, .{ response_code, @tagName(status_description), body.len });
     _ = try self.conn.stream.writer().write(body);
 }
-
-const Content = union(enum) {
-    Text: []const u8,
-    Json: []const u8,
-};

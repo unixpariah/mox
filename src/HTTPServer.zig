@@ -50,18 +50,9 @@ pub fn setListener(
     listener: *const fn (request: Request, parameters: [][]const u8, data: T) anyerror!void,
     data: T,
 ) !*Handler {
-    const buffer = try std.fmt.allocPrint(
-        self.alloc,
-        "{s}{s}",
-        .{ @tagName(method), path },
-    );
-    defer self.alloc.free(buffer);
-
     return self.tree.addPath(method, path, .{
-        .alloc = self.alloc,
         .callback = @ptrCast(listener),
         .data = @ptrCast(data),
-        .error_handler = null,
     });
 }
 
@@ -100,11 +91,10 @@ pub fn run(self: *Self) !void {
         const request = Request.init(conn, header, &arena);
 
         var buffer = std.ArrayList([]const u8).init(arena.allocator());
-        defer buffer.deinit();
 
         const handler = self.tree.getPath(path.@"0", path.@"1", &buffer) catch |err| switch (err) {
             error.PathNotFound => {
-                try request.respond(.{ .Text = "NOT FOUND" }, 404);
+                try request.reply(.{ .content_type = .TEXT, .payload = "NOT FOUND" }, 404);
                 continue;
             },
             else => return err,
@@ -112,10 +102,10 @@ pub fn run(self: *Self) !void {
 
         const callback: *const fn (Request, [][]const u8, ?*anyopaque) anyerror!void = @ptrCast(handler.callback);
         callback(request, buffer.items, handler.data) catch |err| {
-            handler.handleError(request, err) catch |inner_err| {
-                const error_handler: *const fn (Request, anyerror, ?*anyopaque) void = @ptrCast(self.error_handler.function);
-                error_handler(request, inner_err, self.error_handler.data);
-            };
+            //handler.handleError(request, err) catch |inner_err| {
+            const error_handler: *const fn (Request, anyerror, ?*anyopaque) void = @ptrCast(self.error_handler.function);
+            error_handler(request, err, self.error_handler.data);
+            //};
         };
 
         if (self.exit) break;

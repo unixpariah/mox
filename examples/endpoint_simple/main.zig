@@ -16,19 +16,12 @@ pub fn main() !void {
     std.debug.print("Listening on: {s}:{}", .{ server.ip, server.port });
 
     var counter: i32 = 0;
-    _ = try (try server.setListener(.POST, "/counter/modify/{}", *i32, postCounterModify, &counter)).addErrorHandler(*i32, err, &counter);
+    _ = try server.setListener(.POST, "/counter/modify/{}", *i32, postCounterModify, &counter);
     _ = try server.setListener(.POST, "/counter/reset", *i32, postCounterReset, &counter);
     _ = try server.setListener(.GET, "/counter", *i32, getCounter, &counter);
     _ = try server.setListener(.GET, "/exit", *mox.HTTPServer, getExit, &server);
 
     try server.run();
-}
-
-fn err(request: mox.Request, errr: anyerror, counter: *i32) !void {
-    if (errr == error.Over10) {
-        counter.* = 0;
-        try request.respond(.{ .Text = "Over 10" }, 200);
-    }
 }
 
 fn getExit(_: mox.Request, _: [][]const u8, server: *mox.HTTPServer) !void {
@@ -39,8 +32,8 @@ fn postCounterModify(request: mox.Request, parameters: [][]const u8, counter: *i
     const number = try std.fmt.parseInt(i32, parameters[0], 10);
     counter.* += number;
 
-    try request.respond(.{ .Text = try std.fmt.allocPrint(
-        request.arena.child_allocator,
+    try request.reply(.{ .content_type = .TEXT, .payload = try std.fmt.allocPrint(
+        request.alloc,
         "Number incremented by {} by this individual: {}\n",
         .{ number, request.conn.address },
     ) }, 200);
@@ -51,9 +44,9 @@ fn postCounterModify(request: mox.Request, parameters: [][]const u8, counter: *i
 fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) anyerror!void {
     counter.* = 0;
 
-    try request.respond(
-        .{ .Text = try std.fmt.allocPrint(
-            request.arena.child_allocator,
+    try request.reply(
+        .{ .content_type = .TEXT, .payload = try std.fmt.allocPrint(
+            request.alloc,
             "Number reseted by this individual: {}\n",
             .{request.conn.address},
         ) },
@@ -62,9 +55,9 @@ fn postCounterReset(request: mox.Request, _: [][]const u8, counter: *i32) anyerr
 }
 
 fn getCounter(request: mox.Request, _: [][]const u8, counter: *i32) anyerror!void {
-    try request.respond(
-        .{ .Text = try std.fmt.allocPrint(
-            request.arena.child_allocator,
+    try request.reply(
+        .{ .content_type = .TEXT, .payload = try std.fmt.allocPrint(
+            request.alloc,
             "Number is: {}\n",
             .{counter.*},
         ) },
