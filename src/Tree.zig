@@ -51,14 +51,14 @@ pub fn deinit(self: *Self) void {
 pub fn addPath(self: *Self, method: std.http.Method, path: []const u8, handler: Handler) !*Handler {
     var path_iter = std.mem.splitScalar(u8, path, '/');
     _ = path_iter.first();
-    const index: usize = @intCast(method_map.get(@tagName(method)) orelse @panic("Unsupported method"));
+    const index: usize = @intCast(method_map.get(@tagName(method)) orelse return error.Unsupported);
     return self.children[index].addPath(self.arena.allocator(), handler, &path_iter);
 }
 
 pub fn getPath(self: *Self, method: std.http.Method, path: []const u8, buffer: *std.ArrayList([]const u8)) !*Handler {
     var path_iter = std.mem.splitScalar(u8, path, '/');
     _ = path_iter.first();
-    const index: usize = @intCast(method_map.get(@tagName(method)) orelse @panic("Unsupported method"));
+    const index: usize = @intCast(method_map.get(@tagName(method)) orelse return error.Unsupported);
     return self.children[index].getPath(&path_iter, buffer);
 }
 

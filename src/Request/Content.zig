@@ -1,14 +1,18 @@
+const std = @import("std");
+
 const ContentType = enum {
     TEXT,
     JSON,
     HTML,
 
     pub fn stringify(self: *const ContentType) []const u8 {
-        return switch (self.*) {
-            .TEXT => "text/plain",
-            .JSON => "application/json",
-            .HTML => "text/html",
-        };
+        const content_map = std.StaticStringMap([]const u8).initComptime(.{
+            .{ "TEXT", "text/plain" },
+            .{ "JSON", "application/json" },
+            .{ "HTML", "text/html" },
+        });
+
+        return content_map.get(@tagName(self.*)).?;
     }
 };
 
