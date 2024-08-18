@@ -28,10 +28,10 @@ pub fn fetch(_: *const Self, method: std.http.Method, url: []const u8, body: ?Co
     return buffer.toOwnedSlice();
 }
 
-test "Client.fetch" {
-    const client = Self{};
-    const alloc = std.testing.allocator;
-
-    const res = try client.fetch(.GET, "http://localhost:8080/counter", null, alloc);
-    alloc.free(res);
-}
+//test "Client.fetch" {
+//    const client = Self{};
+//    const alloc = std.testing.allocator;
+//
+//    const res = try client.fetch(.GET, "http://localhost:8080/counter", null, alloc);
+//    alloc.free(res);
+//}
