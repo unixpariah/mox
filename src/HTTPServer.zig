@@ -4,6 +4,7 @@ const Request = @import("Request.zig");
 const UUID = @import("UUID.zig");
 const Handler = @import("Tree.zig").Handler;
 
+max_parameters: usize = 0,
 ip: []const u8 = undefined,
 port: u16 = undefined,
 listener: ?std.net.Server = null,
@@ -23,7 +24,7 @@ pub fn init(alloc: std.mem.Allocator) Self {
         .alloc = alloc,
         .tree = Tree.init(alloc),
         .error_handler = .{
-            .function = @ptrCast(&errorHandler),
+            .function = &errorHandler,
             .data = null,
         },
     };
@@ -50,6 +51,9 @@ pub fn setListener(
     listener: *const fn (request: Request, parameters: [][]const u8, data: T) anyerror!void,
     data: T,
 ) !*Handler {
+    const count = std.mem.count(u8, path, "{}");
+    if (count > self.max_parameters) self.max_parameters = count;
+
     return self.tree.addPath(method, path, .{
         .callback = @ptrCast(listener),
         .data = @ptrCast(data),
@@ -79,9 +83,7 @@ pub fn run(self: *Self) !void {
         while (conn.stream.read(recv_buf[recv_total..])) |recv_len| {
             if (recv_len == 0) break;
             recv_total += recv_len;
-            if (std.mem.containsAtLeast(u8, recv_buf[0..recv_total], 1, "\r\n\r\n")) {
-                break;
-            }
+            if (std.mem.containsAtLeast(u8, recv_buf[0..recv_total], 1, "\r\n\r\n")) break;
         } else |err| return err;
 
         const recv_data = recv_buf[0..recv_total];
@@ -90,22 +92,19 @@ pub fn run(self: *Self) !void {
 
         const request = Request.init(conn, header, &arena);
 
-        var buffer = std.ArrayList([]const u8).init(arena.allocator());
-
-        const handler = self.tree.getPath(path.@"0", path.@"1", &buffer) catch |err| switch (err) {
-            error.PathNotFound => {
-                try request.reply(.{ .content_type = .TEXT, .payload = "NOT FOUND" }, 404);
-                continue;
-            },
-            else => return err,
+        const buffer = try self.alloc.alloc([]const u8, self.max_parameters);
+        var parameters = std.ArrayListUnmanaged([]const u8, self.max_parameters).initBuffer(buffer);
+        const handler = self.tree.getPath(path.@"0", path.@"1", &parameters) orelse {
+            try request.reply(.{ .content_type = .TEXT, .payload = "NOT FOUND" }, 404);
+            continue;
         };
 
-        const callback: *const fn (Request, [][]const u8, ?*anyopaque) anyerror!void = @ptrCast(handler.callback);
-        callback(request, buffer.items, handler.data) catch |err| {
-            //handler.handleError(request, err) catch |inner_err| {
-            const error_handler: *const fn (Request, anyerror, ?*anyopaque) void = @ptrCast(self.error_handler.function);
-            error_handler(request, err, self.error_handler.data);
-            //};
+        handler.callback(request, buffer.items, handler.data) catch |err| {
+            if (handler.error_handler) |error_handler| {
+                try error_handler.error_handler(request, err, error_handler.data);
+                continue;
+            }
+            self.error_handler.function(request, err, self.error_handler.data);
         };
 
         if (self.exit) break;
@@ -169,34 +168,27 @@ test "mox.setListener" {
     var mox = Self.init(alloc);
     defer mox.deinit();
 
-    const test_struct = struct {
-        fn getHello(_: Request, _: [][]const u8, _: ?*i32) anyerror!void {}
-    };
+    _ = try mox.setListener(.GET, "/hello", ?*i32, undefined, null);
+    _ = try mox.setListener(.POST, "/hello", ?*i32, undefined, null);
+    _ = try mox.setListener(.GET, "/hello/{}", ?*i32, undefined, null);
+    _ = try mox.setListener(.GET, "/hello/someone", ?*i32, undefined, null);
 
-    _ = try mox.setListener(.GET, "/hello", ?*i32, test_struct.getHello, null);
-    var void_buffer = std.ArrayList([]const u8).init(alloc);
-    defer void_buffer.deinit();
-    _ = try mox.tree.getPath(.GET, "/hello", &void_buffer);
+    try testing.expectEqual(mox.setListener(.GET, "/hello", ?*i32, undefined, null), error.ListenerExists);
+    try testing.expectEqual(mox.setListener(.GET, "/hello/{}", ?*i32, undefined, null), error.ListenerExists);
 
-    try testing.expect(mox.setListener(
-        .GET,
-        "/hello",
-        ?*i32,
-        test_struct.getHello,
-        null,
-    ) == error.ListenerExists);
-    _ = try mox.setListener(.POST, "/hello", ?*i32, test_struct.getHello, null);
-    _ = try mox.tree.getPath(.POST, "/hello", &void_buffer);
-    _ = try mox.setListener(.GET, "/hello/{}", ?*i32, test_struct.getHello, null);
-    _ = try mox.setListener(.GET, "/hello/someone", ?*i32, test_struct.getHello, null);
+    try testing.expect(mox.tree.getPath(.GET, "/hello", undefined) != null);
+    try testing.expect(mox.tree.getPath(.POST, "/hello", undefined) != null);
 
     var buffer = std.ArrayList([]const u8).init(alloc);
     defer buffer.deinit();
-    _ = try mox.tree.getPath(.GET, "/hello/world", &buffer);
+
+    _ = mox.tree.getPath(.GET, "/hello/world", &buffer).?;
+    try testing.expectEqual(buffer.items.len, 1);
     try testing.expect(std.mem.eql(u8, buffer.items[0], "world"));
+
     buffer.clearAndFree();
 
-    _ = try mox.tree.getPath(.GET, "/hello/someone", &buffer);
+    _ = mox.tree.getPath(.GET, "/hello/someone", &buffer).?;
     try testing.expect(buffer.items.len == 0);
 }
 
@@ -226,10 +218,8 @@ test "mox.run" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    const Data = struct {};
-
     const test_struct = struct {
-        fn getHello(_: Request, _: [][]const u8, _: *Data) anyerror!void {}
+        fn getHello(_: Request, _: [][]const u8, _: ?*anyopaque) anyerror!void {}
     };
 
     var server = Self.init(alloc);
@@ -247,13 +237,12 @@ test "mox.run" {
         break;
     }
 
-    var data = Data{};
     _ = try server.setListener(
         .GET,
         "/hello",
-        *Data,
+        ?*anyopaque,
         test_struct.getHello,
-        &data,
+        null,
     );
 
     // TODO: Make it run in background

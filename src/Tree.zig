@@ -1,10 +1,34 @@
 const std = @import("std");
 const Request = @import("Request.zig");
 
+const ErrorHandler = struct {
+    error_handler: *const fn (Request, anyerror, ?*anyopaque) anyerror!void,
+    data: ?*anyopaque,
+    nested_error_handler: ?*ErrorHandler = null,
+
+    pub fn addErrorHandler(self: *Handler, comptime T: type, listener: *const fn (Request, anyerror, T) anyerror!void, data: T) *ErrorHandler {
+        self.error_handler = .{
+            .error_handler = @ptrCast(listener),
+            .data = data,
+        };
+
+        return &self.error_handler.?;
+    }
+};
+
 pub const Handler = struct {
     callback: *const fn (Request, [][]const u8, ?*anyopaque) anyerror!void,
     data: ?*anyopaque,
-    error_handler: ?*Handler = null,
+    error_handler: ?ErrorHandler = null,
+
+    pub fn addErrorHandler(self: *Handler, comptime T: type, listener: *const fn (Request, anyerror, T) anyerror!void, data: T) *ErrorHandler {
+        self.error_handler = .{
+            .error_handler = @ptrCast(listener),
+            .data = data,
+        };
+
+        return &self.error_handler.?;
+    }
 };
 
 const method_map = std.StaticStringMap(u4).initComptime(.{
@@ -55,10 +79,10 @@ pub fn addPath(self: *Self, method: std.http.Method, path: []const u8, handler: 
     return self.children[index].addPath(self.arena.allocator(), handler, &path_iter);
 }
 
-pub fn getPath(self: *Self, method: std.http.Method, path: []const u8, buffer: *std.ArrayList([]const u8)) !*Handler {
+pub fn getPath(self: *Self, method: std.http.Method, path: []const u8, buffer: *std.ArrayListUnmanaged([]const u8)) ?*Handler {
     var path_iter = std.mem.splitScalar(u8, path, '/');
     _ = path_iter.first();
-    const index: usize = @intCast(method_map.get(@tagName(method)) orelse return error.Unsupported);
+    const index: usize = @intCast(method_map.get(@tagName(method)).?);
     return self.children[index].getPath(&path_iter, buffer);
 }
 
@@ -85,47 +109,45 @@ const Node = struct {
             return child.addPath(alloc, handler, path_iter);
         }
 
-        // TODO: make this part prettier
-        var node = Node.init(alloc);
-        if (path_iter.peek() == null) {
-            node.data = handler;
-            try self.children.put(try alloc.dupe(u8, segment), node);
-            return &node.data.?;
-        }
-        const h = try node.addPath(alloc, handler, path_iter);
+        const node = Node.init(alloc);
         try self.children.put(try alloc.dupe(u8, segment), node);
-        return h;
+        var child = self.children.getPtr(segment).?;
+        if (path_iter.peek() == null) {
+            child.data = handler;
+            return &child.data.?;
+        }
+        return child.addPath(alloc, handler, path_iter);
     }
 
-    fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), buffer: *std.ArrayList([]const u8)) !*Handler {
-        const segment = path_iter.next() orelse return error.PathNotFound;
+    fn getPath(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), buffer: *std.ArrayListUnmanaged([]const u8)) ?*Handler {
+        const segment = path_iter.next().?; // Will return before it ever goes null so safe to unwrap
 
         if (self.children.getPtr(segment)) |child| {
-            if (path_iter.peek() == null) return if (child.data) |*data| data else error.PathNotFound;
+            if (path_iter.peek() == null) return if (child.data) |*data| data else null;
             return child.getPath(path_iter, buffer);
         }
 
         if (self.children.getPtr("{}")) |child| {
-            try buffer.append(segment);
-            if (path_iter.peek() == null) return if (child.data) |*data| data else error.PathNotFound;
+            buffer.appendAssumeCapacity(segment);
+            if (path_iter.peek() == null) return if (child.data) |*data| data else null;
             return child.getPath(path_iter, buffer);
         }
 
-        return error.PathNotFound;
+        return null;
     }
 
     fn addErrorHandler(self: *Node, path_iter: *std.mem.SplitIterator(u8, .scalar), error_handler: *?anyopaque) !void {
-        const segment = path_iter.next() orelse return error.PathNotFound;
+        const segment = path_iter.next().?; // Will return before it ever goes null so safe to unwrap
 
         if (self.children.getPtr(segment)) |child| {
             if (path_iter.peek() == null) {
-                if (child.data == null) return error.PathNotFound;
+                if (child.data == null) return null;
                 child.data.?.error_handler = error_handler;
             }
             return child.addErrorHandler(&path_iter, error_handler);
         }
 
-        return error.PathNotFound;
+        return null;
     }
 };
 
@@ -133,62 +155,33 @@ test "Tree.addPath" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    const Data = struct {
-        number: u8 = 0,
-    };
-
-    const test_functions = struct {
-        fn getNothing(_: Request, _: [][]const u8, _: ?*anyopaque) !void {}
-    };
-
-    var data = Data{};
-
     var tree = Self.init(alloc);
     defer tree.deinit();
 
-    _ = try tree.addPath(.GET, "/", .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
+    const handler = Handler{
+        .callback = undefined,
+        .data = null,
         .error_handler = null,
-    });
+    };
+
+    _ = try tree.addPath(.GET, "/", handler);
+    _ = try tree.addPath(.POST, "/hello/world", handler);
+    _ = try tree.addPath(.GET, "/hello/world", handler);
+    _ = try tree.addPath(.GET, "/{}", handler);
+
+    try testing.expectEqual(tree.addPath(.GET, "/", handler), error.ListenerExists);
+    try testing.expectEqual(tree.addPath(.GET, "/{}", handler), error.ListenerExists);
 
     try testing.expect(tree.children[0].children.get("") != null);
     try testing.expect(tree.children[0].children.get("").?.data != null);
 
-    _ = try tree.addPath(.POST, "/hello/world", .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    });
     try testing.expect(tree.children[3].children.get("hello") != null);
     try testing.expect(tree.children[3].children.get("hello").?.children.get("world") != null);
     try testing.expect(tree.children[3].children.get("hello").?.children.get("world").?.data != null);
 
-    _ = try tree.addPath(.POST, "/bye/world", .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    });
-    try testing.expect(tree.children[3].children.get("bye").?.children.get("world") != null);
-    try testing.expect(tree.children[3].children.get("bye").?.children.get("world").?.data != null);
+    try testing.expect(tree.children[0].children.get("hello").?.children.get("world") != null);
+    try testing.expect(tree.children[0].children.get("hello").?.children.get("world").?.data != null);
 
-    try testing.expect(tree.addPath(.POST, "/bye/world", .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    }) == error.ListenerExists);
-
-    try testing.expect(tree.addPath(.GET, "/", .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    }) == error.ListenerExists);
-
-    _ = try tree.addPath(.GET, "/{}", .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    });
     try testing.expect(tree.children[0].children.get("{}") != null);
     try testing.expect(tree.children[0].children.get("{}").?.data != null);
 }
@@ -211,53 +204,45 @@ test "Tree.getPath" {
     };
 
     var data = Data{};
-    var void_buffer = std.ArrayList([]const u8).init(alloc);
-    defer void_buffer.deinit();
 
     var tree = Self.init(alloc);
     defer tree.deinit();
 
-    const handler: Handler = .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
+    const handlers: [3]Handler = .{
+        .{
+            .callback = @ptrCast(&test_functions.getNothing),
+            .data = @ptrCast(&data),
+            .error_handler = null,
+        },
+        .{
+            .callback = @ptrCast(&test_functions.getHello),
+            .data = @ptrCast(&data),
+            .error_handler = null,
+        },
+        .{
+            .callback = @ptrCast(&test_functions.getNothing),
+            .data = @ptrCast(&data),
+            .error_handler = null,
+        },
     };
-    _ = try tree.addPath(.GET, "/", handler);
-    try testing.expect(eql((try tree.getPath(.GET, "/", &void_buffer)).*, handler));
 
-    const hello_world_handler: Handler = .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    };
-    _ = try tree.addPath(.GET, "/hello/world", hello_world_handler);
-    try testing.expect(tree.getPath(.GET, "/hello", &void_buffer) == error.PathNotFound);
-    try testing.expect(eql((try tree.getPath(.GET, "/hello/world", &void_buffer)).*, hello_world_handler));
+    _ = try tree.addPath(.GET, "/", handlers[0]);
+    _ = try tree.addPath(.GET, "/hello/world", handlers[0]);
+    _ = try tree.addPath(.GET, "/bye/world", handlers[0]);
 
-    const bye_world_handler: Handler = .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    };
-    _ = try tree.addPath(.GET, "/bye/world", bye_world_handler);
-    try testing.expect(tree.getPath(.GET, "/bye", &void_buffer) == error.PathNotFound);
-    try testing.expect(eql((try tree.getPath(.GET, "/bye/world", &void_buffer)).*, bye_world_handler));
+    try testing.expect(eql((tree.getPath(.GET, "/", undefined)).?.*, handlers[0]));
 
-    const hello_handler: Handler = .{
-        .callback = @ptrCast(&test_functions.getHello),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    };
-    _ = try tree.addPath(.GET, "/hello", hello_handler);
-    try testing.expect(eql((try tree.getPath(.GET, "/hello", &void_buffer)).*, hello_handler));
+    try testing.expectEqual(tree.getPath(.GET, "/hello", undefined), null);
+    try testing.expectEqual(tree.getPath(.GET, "/hello/world", undefined).?.*, handlers[0]);
 
-    const bye_handler: Handler = .{
-        .callback = @ptrCast(&test_functions.getNothing),
-        .data = @ptrCast(&data),
-        .error_handler = null,
-    };
-    _ = try tree.addPath(.GET, "/bye", bye_handler);
-    try testing.expect(eql((try tree.getPath(.GET, "/bye", &void_buffer)).*, bye_handler));
+    try testing.expectEqual(tree.getPath(.GET, "/bye", undefined), null);
+    try testing.expectEqual(tree.getPath(.GET, "/bye/world", undefined).?.*, handlers[0]);
+
+    _ = try tree.addPath(.GET, "/hello", handlers[1]);
+    try testing.expectEqual(tree.getPath(.GET, "/hello", undefined).?.*, handlers[1]);
+
+    _ = try tree.addPath(.GET, "/bye", handlers[2]);
+    try testing.expectEqual(tree.getPath(.GET, "/bye", undefined).?.*, handlers[2]);
 
     const functions = struct {
         fn getIncrement(counter: *i32) void {
@@ -273,58 +258,53 @@ test "Tree.getPath" {
 
     var counter: i32 = 0;
 
-    {
-        const increment_handler: Handler = .{
-            .callback = @ptrCast(&functions.getIncrement),
-            .data = @ptrCast(&counter),
-            .error_handler = null,
-        };
-        _ = try tree.addPath(.GET, "/increment", increment_handler);
+    _ = try tree.addPath(.GET, "/increment", .{
+        .callback = @ptrCast(&functions.getIncrement),
+        .data = @ptrCast(&counter),
+        .error_handler = null,
+    });
 
-        const decrement_handler: Handler = .{
-            .callback = @ptrCast(&functions.getDecrement),
-            .data = @ptrCast(&counter),
-            .error_handler = null,
-        };
-        _ = try tree.addPath(.GET, "/decrement", decrement_handler);
+    _ = try tree.addPath(.GET, "/decrement", .{
+        .callback = @ptrCast(&functions.getDecrement),
+        .data = @ptrCast(&counter),
+        .error_handler = null,
+    });
 
-        const reset_handler: Handler = .{
-            .callback = @ptrCast(&functions.getReset),
-            .data = @ptrCast(&counter),
-            .error_handler = null,
-        };
-        _ = try tree.addPath(.GET, "/reset", reset_handler);
-    }
+    _ = try tree.addPath(.GET, "/reset", .{
+        .callback = @ptrCast(&functions.getReset),
+        .data = @ptrCast(&counter),
+        .error_handler = null,
+    });
 
     {
-        const increment_handler = try tree.getPath(.GET, "/increment", &void_buffer);
+        const increment_handler = tree.getPath(.GET, "/increment", undefined).?;
         const incrementCallback: *const fn (*i32) void = @ptrCast(increment_handler.callback);
 
-        const decrement_handler = try tree.getPath(.GET, "/decrement", &void_buffer);
+        const decrement_handler = tree.getPath(.GET, "/decrement", undefined).?;
         const decrementCallback: *const fn (*i32) void = @ptrCast(decrement_handler.callback);
 
-        const reset_handler = try tree.getPath(.GET, "/reset", &void_buffer);
+        const reset_handler = tree.getPath(.GET, "/reset", undefined).?;
         const resetCallback: *const fn (*i32) void = @ptrCast(reset_handler.callback);
 
-        try testing.expect(counter == 0);
+        try testing.expectEqual(counter, 0);
 
         incrementCallback(&counter);
-        try testing.expect(counter == 1);
+        try testing.expectEqual(counter, 1);
 
         incrementCallback(&counter);
-        try testing.expect(counter == 2);
+        try testing.expectEqual(counter, 2);
 
         decrementCallback(&counter);
-        try testing.expect(counter == 1);
+        try testing.expectEqual(counter, 1);
 
         incrementCallback(&counter);
-        try testing.expect(counter == 2);
+        try testing.expectEqual(counter, 2);
 
         decrementCallback(&counter);
-        try testing.expect(counter == 1);
+        try testing.expectEqual(counter, 1);
 
         resetCallback(&counter);
-        try testing.expect(counter == 0);
+        try testing.expectEqual(counter, 0);
     }
 
     const functions2 = struct {
@@ -367,22 +347,22 @@ test "Tree.getPath" {
     {
         var increment_buffer = std.ArrayList([]const u8).init(alloc);
         defer increment_buffer.deinit();
-        const increment_handler = try tree.getPath(.GET, "/increment/10", &increment_buffer);
+        const increment_handler = tree.getPath(.GET, "/increment/10", &increment_buffer).?;
         const incrementCallback: *const fn ([][]const u8, *i32) void = @ptrCast(increment_handler.callback);
         try testing.expect(increment_buffer.items.len == 1);
         try testing.expect(std.mem.eql(u8, increment_buffer.items[0], "10"));
 
         var decrement_buffer = std.ArrayList([]const u8).init(alloc);
         defer decrement_buffer.deinit();
-        const decrement_handler = try tree.getPath(.GET, "/decrement/10", &decrement_buffer);
+        const decrement_handler = tree.getPath(.GET, "/decrement/10", &decrement_buffer).?;
         const decrementCallback: *const fn ([][]const u8, *i32) void = @ptrCast(decrement_handler.callback);
         try testing.expect(decrement_buffer.items.len == 1);
         try testing.expect(std.mem.eql(u8, decrement_buffer.items[0], "10"));
 
-        const decrement_by_5_handler = try tree.getPath(.GET, "/decrement/by_five", &void_buffer);
+        const decrement_by_5_handler = tree.getPath(.GET, "/decrement/by_five", undefined).?;
         const decrementBy5Callback: *const fn (*i32) void = @ptrCast(decrement_by_5_handler.callback);
 
-        const reset_handler = try tree.getPath(.GET, "/reset", &void_buffer);
+        const reset_handler = tree.getPath(.GET, "/reset", undefined).?;
         const resetCallback: *const fn (*i32) void = @ptrCast(reset_handler.callback);
 
         try testing.expect(counter == 0);
@@ -408,4 +388,24 @@ test "Tree.getPath" {
         resetCallback(&counter);
         try testing.expect(counter == 0);
     }
+}
+
+test "Handler.addErrorHandler" {
+    const testing = std.testing;
+
+    const test_struct = struct {
+        fn function(_: Request, _: [][]const u8, _: ?*anyopaque) !void {}
+        fn functionErr(_: Request, _: anyerror, _: ?*anyopaque) !void {}
+    };
+
+    var handler = Handler{
+        .data = null,
+        .error_handler = null,
+        .callback = &test_struct.function,
+    };
+
+    const err_handler = handler.addErrorHandler(?*anyopaque, &test_struct.functionErr, null);
+
+    try testing.expectEqual(err_handler.error_handler, test_struct.functionErr);
+    try testing.expect(handler.error_handler != null);
 }
