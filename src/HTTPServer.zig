@@ -93,13 +93,13 @@ pub fn run(self: *Self) !void {
         const request = Request.init(conn, header, &arena);
 
         const buffer = try self.alloc.alloc([]const u8, self.max_parameters);
-        var parameters = std.ArrayListUnmanaged([]const u8, self.max_parameters).initBuffer(buffer);
+        var parameters = std.ArrayListUnmanaged([]const u8).initBuffer(buffer);
         const handler = self.tree.getPath(path.@"0", path.@"1", &parameters) orelse {
             try request.reply(.{ .content_type = .TEXT, .payload = "NOT FOUND" }, 404);
             continue;
         };
 
-        handler.callback(request, buffer.items, handler.data) catch |err| {
+        handler.callback(request, parameters.items, handler.data) catch |err| {
             if (handler.error_handler) |error_handler| {
                 try error_handler.error_handler(request, err, error_handler.data);
                 continue;
@@ -179,14 +179,14 @@ test "mox.setListener" {
     try testing.expect(mox.tree.getPath(.GET, "/hello", undefined) != null);
     try testing.expect(mox.tree.getPath(.POST, "/hello", undefined) != null);
 
-    var buffer = std.ArrayList([]const u8).init(alloc);
-    defer buffer.deinit();
+    var buffer = std.ArrayListUnmanaged([]const u8).initBuffer(try alloc.alloc([]const u8, 1));
+    defer buffer.deinit(alloc);
 
     _ = mox.tree.getPath(.GET, "/hello/world", &buffer).?;
     try testing.expectEqual(buffer.items.len, 1);
     try testing.expect(std.mem.eql(u8, buffer.items[0], "world"));
 
-    buffer.clearAndFree();
+    buffer.clearAndFree(alloc);
 
     _ = mox.tree.getPath(.GET, "/hello/someone", &buffer).?;
     try testing.expect(buffer.items.len == 0);

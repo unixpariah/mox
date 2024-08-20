@@ -345,15 +345,15 @@ test "Tree.getPath" {
     }
 
     {
-        var increment_buffer = std.ArrayList([]const u8).init(alloc);
-        defer increment_buffer.deinit();
+        var increment_buffer = std.ArrayListUnmanaged([]const u8).initBuffer(try alloc.alloc([]const u8, 1));
+        defer increment_buffer.deinit(alloc);
         const increment_handler = tree.getPath(.GET, "/increment/10", &increment_buffer).?;
         const incrementCallback: *const fn ([][]const u8, *i32) void = @ptrCast(increment_handler.callback);
         try testing.expect(increment_buffer.items.len == 1);
         try testing.expect(std.mem.eql(u8, increment_buffer.items[0], "10"));
 
-        var decrement_buffer = std.ArrayList([]const u8).init(alloc);
-        defer decrement_buffer.deinit();
+        var decrement_buffer = std.ArrayListUnmanaged([]const u8).initBuffer(try alloc.alloc([]const u8, 1));
+        defer decrement_buffer.deinit(alloc);
         const decrement_handler = tree.getPath(.GET, "/decrement/10", &decrement_buffer).?;
         const decrementCallback: *const fn ([][]const u8, *i32) void = @ptrCast(decrement_handler.callback);
         try testing.expect(decrement_buffer.items.len == 1);
